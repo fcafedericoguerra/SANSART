@@ -1,0 +1,8 @@
+[02-Nov-2024 01:57:34 America/Mexico_City] PHP Fatal error:  Uncaught Error: Undefined constant "ABSPATH" in /home2/sansartc/public_html/wp-includes/blocks/index.php:8
+Stack trace:
+#0 {main}
+  thrown in /home2/sansartc/public_html/wp-includes/blocks/index.php on line 8
+[03-Nov-2024 12:02:20 America/Mexico_City] PHP Fatal error:  Uncaught Error: Undefined constant "ABSPATH" in /home2/sansartc/public_html/wp-includes/blocks/index.php:8
+Stack trace:
+#0 {main}
+  thrown in /home2/sansartc/public_html/wp-includes/blocks/index.php on line 8

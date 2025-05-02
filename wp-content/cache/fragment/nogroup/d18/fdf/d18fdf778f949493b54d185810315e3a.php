@@ -1,0 +1,1 @@
+]¤Ðg<?php exit; ?>a:1:{s:7:"content";a:2:{i:0;s:29:"{{WP_PLUGIN_DIR}}/woocommerce";i:1;s:38:"{{WP_PLUGIN_DIR}}/woocommerce-payments";}}
