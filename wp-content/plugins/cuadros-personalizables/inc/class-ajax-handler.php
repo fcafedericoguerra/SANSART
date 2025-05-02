@@ -35,15 +35,23 @@ class CuadrosPersonalizables_Ajax_Handler {
 public function save_personalization() {
     // Verificar nonce
     if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
-        wp_send_json_error('Error de seguridad.');
+        wp_send_json_error('Error de seguridad. Por favor, recarga la página e intenta nuevamente.');
     }
     
     $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
     $image_data = isset($_POST['image_data']) ? $_POST['image_data'] : '';
     $image_state = isset($_POST['image_state']) ? $_POST['image_state'] : '';
     
-    if (!$product_id || !$image_data || !$image_state) {
-        wp_send_json_error('Datos incompletos para guardar la personalización.');
+    if (!$product_id) {
+        wp_send_json_error('Error: ID de producto no válido');
+    }
+    
+    if (empty($image_data)) {
+        wp_send_json_error('Error: No hay datos de imagen para guardar');
+    }
+    
+    if (empty($image_state)) {
+        wp_send_json_error('Error: No hay datos de estado para guardar');
     }
     
     // Verificar que el product_id corresponde a un producto real
@@ -70,16 +78,20 @@ public function save_personalization() {
         wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
     }
     
-    $db = CuadrosPersonalizables_DB::get_instance();
-    $id = $db->save_personalization($product_id, $image_data, $image_state);
-    
-    if ($id) {
-        wp_send_json_success(array(
-            'id' => $id,
-            'message' => 'Personalización guardada correctamente'
-        ));
-    } else {
-        wp_send_json_error('Error al guardar los datos de personalización.');
+    try {
+        $db = CuadrosPersonalizables_DB::get_instance();
+        $id = $db->save_personalization($product_id, $image_data, $image_state);
+        
+        if ($id) {
+            wp_send_json_success(array(
+                'id' => $id,
+                'message' => 'Personalización guardada correctamente'
+            ));
+        } else {
+            wp_send_json_error('Error al guardar los datos en la base de datos.');
+        }
+    } catch (Exception $e) {
+        wp_send_json_error('Error del sistema: ' . $e->getMessage());
     }
 }
     

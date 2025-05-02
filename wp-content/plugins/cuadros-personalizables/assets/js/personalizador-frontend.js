@@ -254,41 +254,93 @@ const rawArea = { ...areaObj };
   
 
   /* ------------------------------ Guardar AJAX ------------------------------- */
-  function guardarPersonalizacion(){
-    if (!userImg) 
-      return Promise.reject('No hay imagen');
-  
-    const finalImg = fabricCanvas.toDataURL({ format:'png', quality:1 });
-  
-    // Incluimos areaSimple y dimensiones de canvas para la recarga exacta
-    const imageState = {
-      left:               userImg.left,
-      top:                userImg.top,
-      scaleX:             userImg.scaleX,
-      scaleY:             userImg.scaleY,
-      angle:              userImg.angle,
-      areaSimple:         { 
-        x: areaObj.x, 
-        y: areaObj.y, 
-        width:  areaObj.width, 
-        height: areaObj.height 
-      },
-      canvasDimensions:   {
-        width:  fabricCanvas.width,
-        height: fabricCanvas.height
-      }
-    };
-  
-    return new Promise((resolve, reject) => {
-      jQuery.post(ajaxUrl, {
-        action:       'save_personalization',
-        security:     nonce,
-        product_id:   productId,
-        image_data:   finalImg,
-        image_state:  JSON.stringify(imageState)
-      }, res => res.success ? resolve(res.data) : reject(res.data))
-      .fail(err => reject(err));
-    });
+  function guardarPersonalizacion() {
+    // Verificar que tenemos una imagen para guardar
+    if (!userImg) {
+      console.error('Error: No hay imagen para guardar');
+      return Promise.reject('No hay imagen para guardar');
+    }
+    
+    // Verificar que tenemos un canvas válido
+    if (!fabricCanvas) {
+      console.error('Error: Canvas no inicializado');
+      return Promise.reject('Error interno: Canvas no disponible');
+    }
+    
+    try {
+      // Generar imagen final con mejor calidad y formato png
+      const finalImg = fabricCanvas.toDataURL({
+        format: 'png',
+        quality: 1,
+        multiplier: 2 // Mejor resolución
+      });
+      
+      // Crear objeto con estado completo de la imagen
+      const imageState = {
+        left: userImg.left,
+        top: userImg.top,
+        scaleX: userImg.scaleX,
+        scaleY: userImg.scaleY,
+        angle: userImg.angle || 0,
+        areaSimple: { 
+          x: areaObj.x, 
+          y: areaObj.y, 
+          width: areaObj.width, 
+          height: areaObj.height 
+        },
+        canvasDimensions: {
+          width: fabricCanvas.width,
+          height: fabricCanvas.height
+        },
+        // Añadir metadata para debugging
+        meta: {
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          screenWidth: window.innerWidth
+        }
+      };
+      
+      console.log('Enviando datos para guardar personalización');
+      
+      // Retornar promesa con mejor manejo de errores
+      return new Promise((resolve, reject) => {
+        jQuery.ajax({
+          url: ajaxUrl,
+          type: 'POST',
+          data: {
+            action: 'save_personalization',
+            security: nonce,
+            product_id: productId,
+            image_data: finalImg,
+            image_state: JSON.stringify(imageState)
+          },
+          dataType: 'json',
+          success: function(response) {
+            if (response && response.success) {
+              console.log('Personalización guardada correctamente', response.data);
+              
+              // Si hay ID de personalización, guardarlo en el campo oculto
+              if (response.data && response.data.id && personalizacionIdField) {
+                personalizacionIdField.value = response.data.id;
+              }
+              
+              resolve(response.data);
+            } else {
+              console.error('Error en respuesta del servidor:', response);
+              reject(response ? response.data : 'Error desconocido del servidor');
+            }
+          },
+          error: function(xhr, status, error) {
+            console.error('Error AJAX al guardar:', status, error);
+            console.log('Detalles del error:', xhr.responseText);
+            reject('Error al comunicarse con el servidor. Por favor, intenta nuevamente.');
+          }
+        });
+      });
+    } catch (error) {
+      console.error('Error al preparar datos para guardar:', error);
+      return Promise.reject('Error interno al procesar la imagen');
+    }
   }
   
 
@@ -372,11 +424,40 @@ function mostrarImagenPrevisualizada(imageData, state) {
 
 
   /* -------------------------- Colocar imagen en área -------------------------- */
-  function colocarImagenEnArea(img){
-    const cx=areaObj.x+areaObj.width/2, cy=areaObj.y+areaObj.height/2;
-    const scale=Math.max((areaObj.width / img.width)*1.1,(areaObj.height / img.height)*1.1);
-    img.set({ left:cx, top:cy, scaleX:scale, scaleY:scale, originX:'center', originY:'center' });
-    img.clipPath=new fabric.Rect({ ...areaObj, absolutePositioned:true });
+  function colocarImagenEnArea(img) {
+    // Calcular centro del área editable
+    const cx = areaObj.x + areaObj.width / 2;
+    const cy = areaObj.y + areaObj.height / 2;
+    
+    // Calcular escala para que la imagen cubra completamente el área
+    // Usamos un factor de 1.05 para asegurar que cubra bien sin excederse demasiado
+    const scaleX = (areaObj.width / img.width) * 1.05;
+    const scaleY = (areaObj.height / img.height) * 1.05;
+    
+    // Usar la escala mayor para mantener proporción y asegurar cobertura
+    const scale = Math.max(scaleX, scaleY);
+    
+    // Aplicar transformaciones
+    img.set({
+      left: cx,
+      top: cy,
+      scaleX: scale,
+      scaleY: scale,
+      originX: 'center',
+      originY: 'center'
+    });
+    
+    // Aplicar clipPath (recorte) al área editable
+    img.clipPath = new fabric.Rect({
+      left: areaObj.x,
+      top: areaObj.y,
+      width: areaObj.width,
+      height: areaObj.height,
+      absolutePositioned: true
+    });
+    
+    // Forzar actualización del canvas
+    fabricCanvas.renderAll();
   }
 
   function setupImageControls(img){
@@ -422,15 +503,77 @@ function mostrarImagenPrevisualizada(imageData, state) {
   if(rotateBtn){ rotateBtn.onclick=()=>{ if(userImg){ userImg.angle=(userImg.angle+90)%360; limitarMovimientoCover(userImg,areaObj,fabricCanvas); fabricCanvas.renderAll(); } } }
 
   /* ------------------------------- Confirmar ------------------------------- */
-  document.addEventListener('click',e=>{
-    if(!e.target.matches('#confirmar-personalizacion')) return;
-    if(!userImg){ alert('Sube una imagen primero'); return; }
+  document.addEventListener('click', e => {
+    if (!e.target.matches('#confirmar-personalizacion')) return;
+    
+    // Verificar que hay una imagen subida
+    if (!userImg) { 
+      alert('Por favor, sube una imagen primero.'); 
+      return; 
+    }
+    
+    // Mostrar indicador de carga
     mostrarCargando();
-    guardarPersonalizacion().then(data=>{
-      if(inputHidden) inputHidden.value=data.image_data;
-      openBtn.classList.add('personalizado'); openBtn.textContent='Editar personalización';
-      popup.style.display='none'; ocultarCargando(); mostrarNotificacion('¡Tu personalización está lista!');
-    }).catch(()=>{ ocultarCargando(); alert('Error al guardar'); });
+    
+    // Guardar con manejo detallado de errores
+    guardarPersonalizacion()
+      .then(data => {
+        // Guardar datos en campo oculto para el carrito
+        if (inputHidden && data.image_data) {
+          inputHidden.value = data.image_data;
+        }
+        
+        // Guardar ID en campo oculto (si existe)
+        if (personalizacionIdField && data.id) {
+          personalizacionIdField.value = data.id;
+        }
+        
+        // Actualizar apariencia del botón personalizar
+        if (openBtn) {
+          openBtn.classList.add('personalizado');
+          openBtn.textContent = 'Editar personalización';
+        }
+        
+        // Cerrar popup y mostrar notificación
+        popup.style.display = 'none';
+        ocultarCargando();
+        mostrarNotificacion('¡Tu personalización está lista!');
+        
+        // Habilitar botón de agregar al carrito
+        const addToCartBtn = document.querySelector('.single_add_to_cart_button');
+        if (addToCartBtn) {
+          addToCartBtn.disabled = false;
+          addToCartBtn.classList.remove('disabled');
+        }
+      })
+      .catch(error => {
+        ocultarCargando();
+        
+        // Mensaje de error más detallado
+        console.error('Error al guardar personalización:', error);
+        
+        // Mostrar mensaje de error específico o genérico
+        const errorMsg = typeof error === 'string' ? error : 'Error al guardar la personalización. Por favor, intenta nuevamente.';
+        
+        // Crear un mensaje de error más visible en lugar de un alert
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-message';
+        errorDiv.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
+        
+        // Insertar en la columna derecha
+        const rightCol = document.querySelector('.col-right');
+        if (rightCol) {
+          // Eliminar mensajes previos
+          const prevError = rightCol.querySelector('.error-message');
+          if (prevError) prevError.remove();
+          
+          // Insertar al inicio
+          rightCol.insertBefore(errorDiv, rightCol.firstChild);
+        } else {
+          // Fallback a alert si no encontramos donde mostrar el error
+          alert(errorMsg);
+        }
+      });
   });
 
   function mostrarErrorEnCanvas(msg){
