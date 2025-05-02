@@ -1,0 +1,27 @@
+{
+    "remotePath": "/public_html/",
+    "host": "ftp.sansart.com.mx",
+    "username": "developer@sansart.com.mx",
+    "password": "bXkE7V9W!sB.",
+    "port": 21,
+    "secure": false,
+    "protocol": "ftp",
+    "uploadOnSave": true,
+    "passive": false,
+    "debug": false,
+    "privateKeyPath": null,
+    "passphrase": null,
+    "agent": null,
+    "allow": [],
+    "ignore": [
+        "\\.vscode",
+        "\\.git",
+        "\\.DS_Store"
+    ],
+    "generatedFiles": {
+        "extensionsToInclude": [
+            ""
+        ],
+        "path": ""
+    }
+}
