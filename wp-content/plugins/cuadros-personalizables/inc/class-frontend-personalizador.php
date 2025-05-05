@@ -535,29 +535,38 @@ public function mostrar_datos_en_carrito( $item_data, $cart_item ) {
     ob_start();
     ?>
     <div class="personalizacion-preview-container">
-        <?php if ( $imagen_base64 ) : ?>
-            <img src="<?php echo esc_attr( $imagen_base64 ); ?>" class="cart-personalizado-preview" alt="<?php esc_attr_e( 'Diseño personalizado', 'cpc' ); ?>" />
-            <div class="personalizacion-actions">
-                <a href="<?php echo esc_attr( $imagen_base64 ); ?>" class="button view-personalizacion"><?php _e( 'Ver imagen', 'cpc' ); ?></a>
-                <a href="<?php echo esc_url( $edit_url ); ?>" class="button edit-personalizacion"><?php _e( 'Editar', 'cpc' ); ?></a>
+        <?php if (!empty($imagen_base64)) : ?>
+            <img src="<?php echo esc_attr($imagen_base64); ?>" 
+                 class="cart-personalizado-preview" 
+                 alt="<?php esc_attr_e('Diseño personalizado', 'cpc'); ?>" 
+                 style="max-width:100px; max-height:100px; display:block !important; margin:5px auto; border:1px solid #ddd;" />
+            <div class="personalizacion-actions" style="margin-top:8px; display:flex; justify-content:center; gap:5px;">
+                <a href="<?php echo esc_url($edit_url); ?>" 
+                   class="button edit-personalizacion" 
+                   style="font-size:12px !important; padding:5px 10px !important; line-height:1.5 !important; height:auto !important;">
+                    <?php _e('Editar', 'cpc'); ?>
+                </a>
             </div>
         <?php else : ?>
-            <p><?php _e( 'La imagen personalizada no está disponible.', 'cpc' ); ?></p>
-            <a href="<?php echo esc_url( $edit_url ); ?>" class="button button-primary edit-personalizacion"><?php _e( 'Editar diseño', 'cpc' ); ?></a>
+            <p><?php _e('La imagen personalizada no está disponible.', 'cpc'); ?></p>
+            <a href="<?php echo esc_url($edit_url); ?>" 
+               class="button button-primary edit-personalizacion">
+                <?php _e('Editar diseño', 'cpc'); ?>
+            </a>
         <?php endif; ?>
     </div>
     <?php
     $html = ob_get_clean();
 
     $item_data[] = array(
-        'key'     => __( 'Diseño Personalizado', 'cpc' ),
-        'display' => wp_kses_post( $html ),
+        'key' => __('Diseño Personalizado', 'cpc'),
+        'display' => wp_kses_post($html),
     );
 
     /* ---------- 4. Encolar recursos sólo en carrito / checkout ---------- */
-    if ( is_cart() || is_checkout() ) {
-        wp_enqueue_style ( 'cpc-css',  CPC_URL . 'assets/css/personalizador.css',  array(), CPC_VER );
-        wp_enqueue_script( 'cpc-cart', CPC_URL . 'assets/js/cart-personalizacion.js', array( 'jquery' ), CPC_VER, true );
+    if (is_cart() || is_checkout()) {
+        wp_enqueue_style('cpc-css', CPC_URL . 'assets/css/personalizador.css', array(), CPC_VER);
+        wp_enqueue_script('cpc-cart', CPC_URL . 'assets/js/cart-personalizacion.js', array('jquery'), CPC_VER, true);
     }
 
     return $item_data;

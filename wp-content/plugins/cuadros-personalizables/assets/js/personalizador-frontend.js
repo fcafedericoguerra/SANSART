@@ -255,20 +255,27 @@ const rawArea = { ...areaObj };
 
   /* ------------------------------ Guardar AJAX ------------------------------- */
   function guardarPersonalizacion() {
-    // Verificar que tenemos una imagen para guardar
+    // Verificar que tenemos imagen para guardar
     if (!userImg) {
       console.error('Error: No hay imagen para guardar');
       return Promise.reject('No hay imagen para guardar');
     }
     
+    // Verificar canvas
+    if (!fabricCanvas) {
+      console.error('Error: Canvas no disponible');
+      return Promise.reject('Canvas no disponible');
+    }
+    
     try {
-      // Generar imagen final con mejor calidad
+      // Generar imagen final con alta calidad
       const finalImg = fabricCanvas.toDataURL({
         format: 'png',
-        quality: 1
+        quality: 1,
+        multiplier: 2 // Para mejor resolución
       });
       
-      // Crear objeto con estado simple y limpio
+      // Crear objeto con estado simple y limpio para evitar problemas de JSON
       const imageState = {
         left: Math.round(userImg.left),
         top: Math.round(userImg.top),
@@ -283,12 +290,9 @@ const rawArea = { ...areaObj };
         }
       };
       
-      // Convertir a JSON simplificado
-      const imageStateJSON = JSON.stringify(imageState);
+      // Mejor manejo de errores
+      console.log('Preparando para guardar personalización');
       
-      console.log('Enviando JSON:', imageStateJSON);
-      
-      // Retornar promesa
       return new Promise((resolve, reject) => {
         jQuery.ajax({
           url: ajaxUrl,
@@ -298,34 +302,28 @@ const rawArea = { ...areaObj };
             security: nonce,
             product_id: productId,
             image_data: finalImg,
-            image_state: imageStateJSON
+            image_state: JSON.stringify(imageState)
           },
           dataType: 'json',
           success: function(response) {
             if (response && response.success) {
-              console.log('Personalización guardada correctamente', response.data);
-              
-              // Si hay ID de personalización, guardarlo en el campo oculto
-              if (response.data && response.data.id && personalizacionIdField) {
-                personalizacionIdField.value = response.data.id;
-              }
-              
+              console.log('Guardado exitoso:', response.data);
               resolve(response.data);
             } else {
-              console.error('Error en respuesta del servidor:', response);
-              reject(response ? response.data : 'Error desconocido del servidor');
+              console.error('Error en respuesta:', response);
+              reject(response && response.data ? response.data : 'Error al guardar');
             }
           },
           error: function(xhr, status, error) {
-            console.error('Error AJAX al guardar:', status, error);
-            console.log('Detalles del error:', xhr.responseText);
-            reject('Error al comunicarse con el servidor. Por favor, intenta nuevamente.');
+            console.error('Error AJAX:', status, error);
+            console.log('Respuesta del servidor:', xhr.responseText);
+            reject('Error de conexión. Intenta nuevamente.');
           }
         });
       });
     } catch (error) {
-      console.error('Error al preparar datos para guardar:', error);
-      return Promise.reject('Error interno al procesar la imagen');
+      console.error('Error al preparar datos:', error);
+      return Promise.reject('Error al preparar imagen para guardar');
     }
   }
   
@@ -484,72 +482,73 @@ function mostrarImagenPrevisualizada(imageData, state) {
       const file = e.target.files[0];
       if (!file) return;
       
-      // Actualizar nombre de archivo en la UI
+      // Actualizar nombre del archivo en la UI
       if (fileLabel) {
         fileLabel.textContent = file.name;
       }
       
-      // Mostrar cargando
+      // Mostrar indicador de carga
       mostrarCargando();
       
+      // Leer el archivo
       const reader = new FileReader();
       reader.onload = ev => {
-        try {
-          // Cargar imagen temporal para verificar resolución
-          const imgTemp = new Image();
-          imgTemp.onload = () => {
-            // Verificar resolución
-            if (!verificarResolucion(imgTemp)) {
-              ocultarCargando();
-              return;
+        // Imagen temporal para verificar resolución
+        const imgTemp = new Image();
+        imgTemp.onload = () => {
+          console.log("Imagen cargada con resolución:", imgTemp.width, "x", imgTemp.height);
+          
+          // Verificar resolución adecuada
+          if (!verificarResolucion(imgTemp)) {
+            ocultarCargando();
+            return;
+          }
+          
+          // Cargar la imagen en Fabric
+          fabric.Image.fromURL(ev.target.result, fbImg => {
+            // Remover imagen anterior si existe
+            if (userImg) {
+              fabricCanvas.remove(userImg);
             }
             
-            // Crear imagen de Fabric
-            fabric.Image.fromURL(ev.target.result, fbImg => {
-              // Eliminar imagen anterior si existe
-              if (userImg) {
-                fabricCanvas.remove(userImg);
-              }
-              
-              // Guardar referencia
-              userImg = fbImg;
-              
-              // Configurar controles y opciones
-              setupImageControls(userImg);
-              
-              // Añadir al canvas
-              fabricCanvas.add(userImg);
-              
-              // Colocar en área editable
-              colocarImagenEnArea(userImg);
-              
-              // Configurar controles de zoom
-              setupZoomControls();
-              
-              // Renderizar canvas
-              fabricCanvas.renderAll();
-              
-              // Ocultar cargando
-              ocultarCargando();
-            }, { crossOrigin: 'anonymous' });
-          };
-          
-          imgTemp.onerror = () => {
+            // Guardar referencia
+            userImg = fbImg;
+            
+            // Configurar controles
+            setupImageControls(userImg);
+            
+            // Añadir al canvas
+            fabricCanvas.add(userImg);
+            
+            // Colocar en área editable
+            colocarImagenEnArea(userImg);
+            
+            // Configurar zoom
+            setupZoomControls();
+            
+            // Asegurar que el canvas se actualice
+            fabricCanvas.renderAll();
+            
+            // Ocultar cargando
             ocultarCargando();
-            mostrarErrorEnCanvas('Error al cargar la imagen. Formato no válido.');
-          };
-          
-          imgTemp.src = ev.target.result;
-        } catch (error) {
-          console.error('Error al procesar la imagen:', error);
+          }, { crossOrigin: 'anonymous' });
+        };
+        
+        // Manejar error de carga
+        imgTemp.onerror = () => {
+          console.error("Error al cargar imagen");
           ocultarCargando();
-          mostrarErrorEnCanvas('Error al procesar la imagen. Intenta con otra imagen.');
-        }
+          mostrarErrorEnCanvas("No se pudo cargar la imagen. Verifica el formato.");
+        };
+        
+        imgTemp.src = ev.target.result;
       };
       
+      // Manejar error de lectura
       reader.onerror = () => {
+        console.error("Error al leer archivo");
         ocultarCargando();
-        mostrarErrorEnCanvas('Error al leer el archivo.');
+        mostrarErrorEnCanvas("Error al leer el archivo.");
       };
       
       reader.readAsDataURL(file);
@@ -557,7 +556,13 @@ function mostrarImagenPrevisualizada(imageData, state) {
   }
 
   /* ---------------------------- Rotar 90° rápido ------------------------------ */
-  if(rotateBtn){ rotateBtn.onclick=()=>{ if(userImg){ userImg.angle=(userImg.angle+90)%360; limitarMovimientoCover(userImg,areaObj,fabricCanvas); fabricCanvas.renderAll(); } } }
+  if (rotateBtn) {
+    rotateBtn.onclick = function() {
+      if (userImg) {
+        rotarImagenManteniendoCentro(userImg, 90);
+      }
+    };
+  }
 
   /* ------------------------------- Confirmar ------------------------------- */
   // Manejar el botón Confirmar
@@ -566,33 +571,34 @@ document.addEventListener('click', e => {
   
   // Verificar si hay imagen
   if (!userImg) {
-    alert('Por favor, sube una imagen primero');
+    alert('Por favor, sube una imagen primero.');
     return;
   }
   
-  // Si el botón está deshabilitado (por baja resolución), mostrar explicación
+  // Si el botón está deshabilitado, mostrar mensaje
   if (e.target.disabled || e.target.classList.contains('disabled')) {
-    alert('La imagen tiene baja resolución para la calidad de impresión. Por favor, sube una imagen de mayor resolución.');
+    alert('La imagen tiene baja resolución. Por favor, sube una imagen de mayor calidad.');
     return;
   }
   
   // Mostrar indicador de carga
   mostrarCargando();
   
-  // Intentar guardar
+  // Guardar personalización
   guardarPersonalizacion()
     .then(data => {
-      // Guardar datos en input hidden para el carrito
+      console.log('Personalización guardada:', data);
+      
+      // Guardar en campos ocultos
       if (inputHidden) {
         inputHidden.value = data.image_data || '';
       }
       
-      // Actualizar ID en campo oculto si está disponible
       if (personalizacionIdField && data.id) {
         personalizacionIdField.value = data.id;
       }
       
-      // Actualizar apariencia botón personalizar
+      // Actualizar botón personalizar
       if (openBtn) {
         openBtn.classList.add('personalizado');
         openBtn.textContent = 'Editar personalización';
@@ -607,7 +613,7 @@ document.addEventListener('click', e => {
       // Mostrar notificación
       mostrarNotificacion('¡Tu personalización está lista!');
       
-      // Habilitar botón de carrito si existe
+      // Habilitar botón agregar al carrito
       const addToCartBtn = document.querySelector('.single_add_to_cart_button');
       if (addToCartBtn) {
         addToCartBtn.disabled = false;
@@ -615,35 +621,40 @@ document.addEventListener('click', e => {
       }
     })
     .catch(error => {
-      console.error('Error al guardar personalización:', error);
+      console.error('Error al guardar:', error);
       ocultarCargando();
       
-      // Mostrar mensaje de error en la interfaz
+      // Crear mensaje de error
       const errorMsg = typeof error === 'string' ? error : 'Error al guardar. Por favor, intenta nuevamente.';
       
-      // Crear div de error
-      const errorElement = document.createElement('div');
-      errorElement.className = 'error-message';
-      errorElement.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
+      // Mostrar error en la interfaz
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'error-message';
+      errorDiv.style.color = '#e74c3c';
+      errorDiv.style.backgroundColor = '#fdeaea';
+      errorDiv.style.padding = '15px';
+      errorDiv.style.borderRadius = '6px';
+      errorDiv.style.marginBottom = '15px';
+      errorDiv.style.textAlign = 'center';
+      errorDiv.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
       
-      // Mostrar en columna derecha
+      // Insertar en columna derecha
       const rightCol = document.querySelector('.col-right');
       if (rightCol) {
-        // Eliminar error previo si existe
+        // Eliminar errores previos
         const prevError = rightCol.querySelector('.error-message');
         if (prevError) prevError.remove();
         
         // Insertar al inicio
-        rightCol.insertBefore(errorElement, rightCol.firstChild);
+        rightCol.insertBefore(errorDiv, rightCol.firstChild);
         
         // Auto-eliminar después de 10 segundos
         setTimeout(() => {
-          if (errorElement.parentNode) {
-            errorElement.remove();
+          if (errorDiv.parentNode) {
+            errorDiv.remove();
           }
         }, 10000);
       } else {
-        // Si no hay columna derecha, usar alert
         alert(errorMsg);
       }
     });
@@ -660,4 +671,67 @@ document.addEventListener('click', e => {
   
   /* ----------------------------- Cerrar modal ------------------------------ */
   if(closeBtn){ closeBtn.addEventListener('click',e=>{ e.preventDefault(); popup.style.display='none'; }); }
+
+  /**
+ * Rota la imagen manteniendo su posición centrada en el área editable
+ * @param {Object} img - La imagen de Fabric.js a rotar
+ * @param {Number} angle - Ángulo en grados (normalmente 90)
+ */
+function rotarImagenManteniendoCentro(img, angle) {
+  if (!img || !areaObj || !fabricCanvas) return;
+  
+  // Calcular centro del área editable
+  const areaCenterX = areaObj.x + areaObj.width / 2;
+  const areaCenterY = areaObj.y + areaObj.height / 2;
+  
+  // Preservar escala actual
+  const currentScaleX = img.scaleX;
+  const currentScaleY = img.scaleY;
+  
+  // Aplicar rotación
+  img.angle = (img.angle || 0) + angle;
+  
+  // Forzar centrado
+  img.set({
+    left: areaCenterX,
+    top: areaCenterY,
+    originX: 'center',
+    originY: 'center',
+    scaleX: currentScaleX,
+    scaleY: currentScaleY
+  });
+  
+  // Actualizar coordenadas y recorte
+  img.setCoords();
+  
+  // Aplicar clipPath (recorte) al área editable
+  img.clipPath = new fabric.Rect({
+    left: areaObj.x,
+    top: areaObj.y,
+    width: areaObj.width,
+    height: areaObj.height,
+    absolutePositioned: true
+  });
+  
+  // Verificar si después de rotar la imagen cubre completamente el área
+  const bound = img.getBoundingRect(true, true);
+  
+  // Si no cubre completamente, ajustar escala
+  if (bound.width < areaObj.width || bound.height < areaObj.height) {
+    const scaleX = (areaObj.width / bound.width) * 1.05;
+    const scaleY = (areaObj.height / bound.height) * 1.05;
+    const newScale = Math.max(scaleX, scaleY);
+    
+    img.set({
+      scaleX: newScale * currentScaleX,
+      scaleY: newScale * currentScaleY
+    });
+    
+    // Actualizar coordenadas
+    img.setCoords();
+  }
+  
+  // Actualizar canvas
+  fabricCanvas.renderAll();
+}
 });

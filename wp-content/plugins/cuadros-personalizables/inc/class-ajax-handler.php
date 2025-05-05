@@ -33,65 +33,68 @@ class CuadrosPersonalizables_Ajax_Handler {
  * Guardar personalización vía AJAX
  */
 public function save_personalization() {
-    // Verificar nonce
+    // Verificar nonce de seguridad
     if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
-        wp_send_json_error('Error de seguridad. Por favor, recarga la página e intenta nuevamente.');
+        wp_send_json_error('Error de seguridad. Recarga la página e intenta nuevamente.');
         return;
     }
     
+    // Obtener y validar datos
     $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
     $image_data = isset($_POST['image_data']) ? wp_unslash($_POST['image_data']) : '';
     $image_state = isset($_POST['image_state']) ? wp_unslash($_POST['image_state']) : '';
     
+    // Verificar que tenemos datos válidos
     if (!$product_id) {
         wp_send_json_error('Error: ID de producto no válido');
         return;
     }
     
-    if (empty($image_data)) {
-        wp_send_json_error('Error: No hay datos de imagen para guardar');
+    if (empty($image_data) || strpos($image_data, 'data:image') !== 0) {
+        wp_send_json_error('Error: Datos de imagen inválidos');
         return;
     }
     
     if (empty($image_state)) {
-        wp_send_json_error('Error: No hay datos de estado para guardar');
+        wp_send_json_error('Error: Estado de imagen vacío');
         return;
     }
     
-    // Verificar que el product_id corresponde a un producto real
+    // Verificar producto
     $product = wc_get_product($product_id);
     if (!$product) {
-        wp_send_json_error('El producto especificado no existe.');
+        wp_send_json_error('El producto especificado no existe');
         return;
     }
     
-    // Decodificar el estado de la imagen para validar
-    $decoded_state = null;
-    
+    // Procesar el estado JSON con mejor manejo de errores
     try {
-        // Limpiar cualquier carácter de control
+        // Limpiar caracteres especiales que podrían causar problemas
         $image_state = preg_replace('/[[:cntrl:]]/', '', $image_state);
-        // Decodificar JSON
+        
+        // Decodificar para verificar validez
         $decoded_state = json_decode($image_state, true);
         
+        // Verificar si hubo error al decodificar
         if (json_last_error() !== JSON_ERROR_NONE) {
-            $error_msg = 'Error JSON: ' . json_last_error_msg();
-            error_log($error_msg);
-            wp_send_json_error($error_msg);
+            $json_error = json_last_error_msg();
+            error_log("Error JSON al guardar personalización: " . $json_error);
+            wp_send_json_error('Error al procesar el formato JSON: ' . $json_error);
             return;
         }
         
-        // Verificar que los campos esenciales estén presentes
-        if (!isset($decoded_state['left']) || !isset($decoded_state['top']) || 
-            !isset($decoded_state['scaleX']) || !isset($decoded_state['scaleY']) ||
-            !isset($decoded_state['areaSimple'])) {
-            wp_send_json_error('Estado de imagen incompleto. Faltan campos requeridos.');
-            return;
+        // Verificar campos mínimos requeridos
+        $required_fields = ['left', 'top', 'scaleX', 'scaleY', 'areaSimple'];
+        foreach ($required_fields as $field) {
+            if (!isset($decoded_state[$field])) {
+                wp_send_json_error('Datos de personalización incompletos');
+                return;
+            }
         }
         
-        // Guardar en la base de datos
+        // Todo parece correcto, guardar en la base de datos
         if (!class_exists('CuadrosPersonalizables_DB')) {
-            wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
+            wp_send_json_error('Módulo de base de datos no disponible');
             return;
         }
         
@@ -101,13 +104,14 @@ public function save_personalization() {
         if ($id) {
             wp_send_json_success(array(
                 'id' => $id,
-                'message' => 'Personalización guardada correctamente'
+                'message' => 'Personalización guardada exitosamente'
             ));
         } else {
-            wp_send_json_error('Error al guardar los datos en la base de datos.');
+            wp_send_json_error('Error al guardar en base de datos');
         }
+        
     } catch (Exception $e) {
-        error_log('Error en save_personalization: ' . $e->getMessage());
+        error_log('Excepción al guardar personalización: ' . $e->getMessage());
         wp_send_json_error('Error del sistema: ' . $e->getMessage());
     }
 }
