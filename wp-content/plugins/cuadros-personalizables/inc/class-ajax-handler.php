@@ -36,49 +36,65 @@ public function save_personalization() {
     // Verificar nonce
     if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
         wp_send_json_error('Error de seguridad. Por favor, recarga la página e intenta nuevamente.');
+        return;
     }
     
     $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
-    $image_data = isset($_POST['image_data']) ? $_POST['image_data'] : '';
-    $image_state = isset($_POST['image_state']) ? $_POST['image_state'] : '';
+    $image_data = isset($_POST['image_data']) ? wp_unslash($_POST['image_data']) : '';
+    $image_state = isset($_POST['image_state']) ? wp_unslash($_POST['image_state']) : '';
     
     if (!$product_id) {
         wp_send_json_error('Error: ID de producto no válido');
+        return;
     }
     
     if (empty($image_data)) {
         wp_send_json_error('Error: No hay datos de imagen para guardar');
+        return;
     }
     
     if (empty($image_state)) {
         wp_send_json_error('Error: No hay datos de estado para guardar');
+        return;
     }
     
     // Verificar que el product_id corresponde a un producto real
     $product = wc_get_product($product_id);
     if (!$product) {
         wp_send_json_error('El producto especificado no existe.');
+        return;
     }
     
     // Decodificar el estado de la imagen para validar
-    $decoded_state = json_decode($image_state, true);
-    if (!$decoded_state) {
-        // Si hay un error al decodificar, intentar sanitizar el JSON
-        $image_state = preg_replace('/[[:cntrl:]]/', '', $image_state);
-        $decoded_state = json_decode($image_state, true);
-        
-        // Si aún falla, enviar error
-        if (!$decoded_state) {
-            wp_send_json_error('Error al procesar los datos del estado de la imagen.');
-        }
-    }
-    
-    // Guardar en la base de datos
-    if (!class_exists('CuadrosPersonalizables_DB')) {
-        wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
-    }
+    $decoded_state = null;
     
     try {
+        // Limpiar cualquier carácter de control
+        $image_state = preg_replace('/[[:cntrl:]]/', '', $image_state);
+        // Decodificar JSON
+        $decoded_state = json_decode($image_state, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $error_msg = 'Error JSON: ' . json_last_error_msg();
+            error_log($error_msg);
+            wp_send_json_error($error_msg);
+            return;
+        }
+        
+        // Verificar que los campos esenciales estén presentes
+        if (!isset($decoded_state['left']) || !isset($decoded_state['top']) || 
+            !isset($decoded_state['scaleX']) || !isset($decoded_state['scaleY']) ||
+            !isset($decoded_state['areaSimple'])) {
+            wp_send_json_error('Estado de imagen incompleto. Faltan campos requeridos.');
+            return;
+        }
+        
+        // Guardar en la base de datos
+        if (!class_exists('CuadrosPersonalizables_DB')) {
+            wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
+            return;
+        }
+        
         $db = CuadrosPersonalizables_DB::get_instance();
         $id = $db->save_personalization($product_id, $image_data, $image_state);
         
@@ -91,6 +107,7 @@ public function save_personalization() {
             wp_send_json_error('Error al guardar los datos en la base de datos.');
         }
     } catch (Exception $e) {
+        error_log('Error en save_personalization: ' . $e->getMessage());
         wp_send_json_error('Error del sistema: ' . $e->getMessage());
     }
 }

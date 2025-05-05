@@ -261,48 +261,34 @@ const rawArea = { ...areaObj };
       return Promise.reject('No hay imagen para guardar');
     }
     
-    // Verificar que tenemos un canvas válido
-    if (!fabricCanvas) {
-      console.error('Error: Canvas no inicializado');
-      return Promise.reject('Error interno: Canvas no disponible');
-    }
-    
     try {
-      // Generar imagen final con mejor calidad y formato png
+      // Generar imagen final con mejor calidad
       const finalImg = fabricCanvas.toDataURL({
         format: 'png',
-        quality: 1,
-        multiplier: 2 // Mejor resolución
+        quality: 1
       });
       
-      // Crear objeto con estado completo de la imagen
+      // Crear objeto con estado simple y limpio
       const imageState = {
-        left: userImg.left,
-        top: userImg.top,
-        scaleX: userImg.scaleX,
-        scaleY: userImg.scaleY,
-        angle: userImg.angle || 0,
+        left: Math.round(userImg.left),
+        top: Math.round(userImg.top),
+        scaleX: parseFloat(userImg.scaleX.toFixed(4)),
+        scaleY: parseFloat(userImg.scaleY.toFixed(4)),
+        angle: parseFloat((userImg.angle || 0).toFixed(2)),
         areaSimple: { 
-          x: areaObj.x, 
-          y: areaObj.y, 
-          width: areaObj.width, 
-          height: areaObj.height 
-        },
-        canvasDimensions: {
-          width: fabricCanvas.width,
-          height: fabricCanvas.height
-        },
-        // Añadir metadata para debugging
-        meta: {
-          timestamp: new Date().toISOString(),
-          userAgent: navigator.userAgent,
-          screenWidth: window.innerWidth
+          x: Math.round(areaObj.x), 
+          y: Math.round(areaObj.y), 
+          width: Math.round(areaObj.width), 
+          height: Math.round(areaObj.height) 
         }
       };
       
-      console.log('Enviando datos para guardar personalización');
+      // Convertir a JSON simplificado
+      const imageStateJSON = JSON.stringify(imageState);
       
-      // Retornar promesa con mejor manejo de errores
+      console.log('Enviando JSON:', imageStateJSON);
+      
+      // Retornar promesa
       return new Promise((resolve, reject) => {
         jQuery.ajax({
           url: ajaxUrl,
@@ -312,7 +298,7 @@ const rawArea = { ...areaObj };
             security: nonce,
             product_id: productId,
             image_data: finalImg,
-            image_state: JSON.stringify(imageState)
+            image_state: imageStateJSON
           },
           dataType: 'json',
           success: function(response) {
@@ -425,19 +411,17 @@ function mostrarImagenPrevisualizada(imageData, state) {
 
   /* -------------------------- Colocar imagen en área -------------------------- */
   function colocarImagenEnArea(img) {
-    // Calcular centro del área editable
+    // Calcular el centro del área editable
     const cx = areaObj.x + areaObj.width / 2;
     const cy = areaObj.y + areaObj.height / 2;
     
-    // Calcular escala para que la imagen cubra completamente el área
-    // Usamos un factor de 1.05 para asegurar que cubra bien sin excederse demasiado
+    // Calcular escala para ajustar la imagen al área
+    // Usamos factor de escala ligeramente mayor para cubrir bien el área
     const scaleX = (areaObj.width / img.width) * 1.05;
     const scaleY = (areaObj.height / img.height) * 1.05;
-    
-    // Usar la escala mayor para mantener proporción y asegurar cobertura
     const scale = Math.max(scaleX, scaleY);
     
-    // Aplicar transformaciones
+    // Posicionar la imagen en el centro del área editable
     img.set({
       left: cx,
       top: cy,
@@ -456,8 +440,17 @@ function mostrarImagenPrevisualizada(imageData, state) {
       absolutePositioned: true
     });
     
-    // Forzar actualización del canvas
+    // Si hay un input de zoom, actualizarlo
+    if (zoomSlider) {
+      zoomSlider.value = scale;
+      zoomSlider.disabled = false;
+    }
+    
+    // Actualizar canvas
     fabricCanvas.renderAll();
+    
+    // Establecer como objeto activo
+    fabricCanvas.setActiveObject(img);
   }
 
   function setupImageControls(img){
@@ -486,95 +479,175 @@ function mostrarImagenPrevisualizada(imageData, state) {
   }
 
   /* ------------------------------ Subir imagen ------------------------------- */
-  if(inputFoto){ inputFoto.addEventListener('change',e=>{
-    const file=e.target.files[0]; if(!file) return; if(fileLabel) fileLabel.textContent=file.name;
-    const reader=new FileReader(); reader.onload=ev=>{
-      const imgTemp=new Image(); imgTemp.onload=()=>{
-        if(!verificarResolucion(imgTemp)){ ocultarCargando(); return; }
-        fabric.Image.fromURL(ev.target.result,fbImg=>{
-          if(userImg) fabricCanvas.remove(userImg);
-          userImg=fbImg; setupImageControls(userImg); fabricCanvas.add(userImg); colocarImagenEnArea(userImg); setupZoomControls(); fabricCanvas.renderAll(); ocultarCargando();
-        },{ crossOrigin:'anonymous' });
-      }; imgTemp.src=ev.target.result; mostrarCargando();
-    }; reader.readAsDataURL(file);
-  }); }
+  if (inputFoto) {
+    inputFoto.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      // Actualizar nombre de archivo en la UI
+      if (fileLabel) {
+        fileLabel.textContent = file.name;
+      }
+      
+      // Mostrar cargando
+      mostrarCargando();
+      
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          // Cargar imagen temporal para verificar resolución
+          const imgTemp = new Image();
+          imgTemp.onload = () => {
+            // Verificar resolución
+            if (!verificarResolucion(imgTemp)) {
+              ocultarCargando();
+              return;
+            }
+            
+            // Crear imagen de Fabric
+            fabric.Image.fromURL(ev.target.result, fbImg => {
+              // Eliminar imagen anterior si existe
+              if (userImg) {
+                fabricCanvas.remove(userImg);
+              }
+              
+              // Guardar referencia
+              userImg = fbImg;
+              
+              // Configurar controles y opciones
+              setupImageControls(userImg);
+              
+              // Añadir al canvas
+              fabricCanvas.add(userImg);
+              
+              // Colocar en área editable
+              colocarImagenEnArea(userImg);
+              
+              // Configurar controles de zoom
+              setupZoomControls();
+              
+              // Renderizar canvas
+              fabricCanvas.renderAll();
+              
+              // Ocultar cargando
+              ocultarCargando();
+            }, { crossOrigin: 'anonymous' });
+          };
+          
+          imgTemp.onerror = () => {
+            ocultarCargando();
+            mostrarErrorEnCanvas('Error al cargar la imagen. Formato no válido.');
+          };
+          
+          imgTemp.src = ev.target.result;
+        } catch (error) {
+          console.error('Error al procesar la imagen:', error);
+          ocultarCargando();
+          mostrarErrorEnCanvas('Error al procesar la imagen. Intenta con otra imagen.');
+        }
+      };
+      
+      reader.onerror = () => {
+        ocultarCargando();
+        mostrarErrorEnCanvas('Error al leer el archivo.');
+      };
+      
+      reader.readAsDataURL(file);
+    });
+  }
 
   /* ---------------------------- Rotar 90° rápido ------------------------------ */
   if(rotateBtn){ rotateBtn.onclick=()=>{ if(userImg){ userImg.angle=(userImg.angle+90)%360; limitarMovimientoCover(userImg,areaObj,fabricCanvas); fabricCanvas.renderAll(); } } }
 
   /* ------------------------------- Confirmar ------------------------------- */
-  document.addEventListener('click', e => {
-    if (!e.target.matches('#confirmar-personalizacion')) return;
-    
-    // Verificar que hay una imagen subida
-    if (!userImg) { 
-      alert('Por favor, sube una imagen primero.'); 
-      return; 
-    }
-    
-    // Mostrar indicador de carga
-    mostrarCargando();
-    
-    // Guardar con manejo detallado de errores
-    guardarPersonalizacion()
-      .then(data => {
-        // Guardar datos en campo oculto para el carrito
-        if (inputHidden && data.image_data) {
-          inputHidden.value = data.image_data;
-        }
+  // Manejar el botón Confirmar
+document.addEventListener('click', e => {
+  if (!e.target.matches('#confirmar-personalizacion')) return;
+  
+  // Verificar si hay imagen
+  if (!userImg) {
+    alert('Por favor, sube una imagen primero');
+    return;
+  }
+  
+  // Si el botón está deshabilitado (por baja resolución), mostrar explicación
+  if (e.target.disabled || e.target.classList.contains('disabled')) {
+    alert('La imagen tiene baja resolución para la calidad de impresión. Por favor, sube una imagen de mayor resolución.');
+    return;
+  }
+  
+  // Mostrar indicador de carga
+  mostrarCargando();
+  
+  // Intentar guardar
+  guardarPersonalizacion()
+    .then(data => {
+      // Guardar datos en input hidden para el carrito
+      if (inputHidden) {
+        inputHidden.value = data.image_data || '';
+      }
+      
+      // Actualizar ID en campo oculto si está disponible
+      if (personalizacionIdField && data.id) {
+        personalizacionIdField.value = data.id;
+      }
+      
+      // Actualizar apariencia botón personalizar
+      if (openBtn) {
+        openBtn.classList.add('personalizado');
+        openBtn.textContent = 'Editar personalización';
+      }
+      
+      // Cerrar popup
+      popup.style.display = 'none';
+      
+      // Ocultar cargando
+      ocultarCargando();
+      
+      // Mostrar notificación
+      mostrarNotificacion('¡Tu personalización está lista!');
+      
+      // Habilitar botón de carrito si existe
+      const addToCartBtn = document.querySelector('.single_add_to_cart_button');
+      if (addToCartBtn) {
+        addToCartBtn.disabled = false;
+        addToCartBtn.classList.remove('disabled');
+      }
+    })
+    .catch(error => {
+      console.error('Error al guardar personalización:', error);
+      ocultarCargando();
+      
+      // Mostrar mensaje de error en la interfaz
+      const errorMsg = typeof error === 'string' ? error : 'Error al guardar. Por favor, intenta nuevamente.';
+      
+      // Crear div de error
+      const errorElement = document.createElement('div');
+      errorElement.className = 'error-message';
+      errorElement.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
+      
+      // Mostrar en columna derecha
+      const rightCol = document.querySelector('.col-right');
+      if (rightCol) {
+        // Eliminar error previo si existe
+        const prevError = rightCol.querySelector('.error-message');
+        if (prevError) prevError.remove();
         
-        // Guardar ID en campo oculto (si existe)
-        if (personalizacionIdField && data.id) {
-          personalizacionIdField.value = data.id;
-        }
+        // Insertar al inicio
+        rightCol.insertBefore(errorElement, rightCol.firstChild);
         
-        // Actualizar apariencia del botón personalizar
-        if (openBtn) {
-          openBtn.classList.add('personalizado');
-          openBtn.textContent = 'Editar personalización';
-        }
-        
-        // Cerrar popup y mostrar notificación
-        popup.style.display = 'none';
-        ocultarCargando();
-        mostrarNotificacion('¡Tu personalización está lista!');
-        
-        // Habilitar botón de agregar al carrito
-        const addToCartBtn = document.querySelector('.single_add_to_cart_button');
-        if (addToCartBtn) {
-          addToCartBtn.disabled = false;
-          addToCartBtn.classList.remove('disabled');
-        }
-      })
-      .catch(error => {
-        ocultarCargando();
-        
-        // Mensaje de error más detallado
-        console.error('Error al guardar personalización:', error);
-        
-        // Mostrar mensaje de error específico o genérico
-        const errorMsg = typeof error === 'string' ? error : 'Error al guardar la personalización. Por favor, intenta nuevamente.';
-        
-        // Crear un mensaje de error más visible en lugar de un alert
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
-        
-        // Insertar en la columna derecha
-        const rightCol = document.querySelector('.col-right');
-        if (rightCol) {
-          // Eliminar mensajes previos
-          const prevError = rightCol.querySelector('.error-message');
-          if (prevError) prevError.remove();
-          
-          // Insertar al inicio
-          rightCol.insertBefore(errorDiv, rightCol.firstChild);
-        } else {
-          // Fallback a alert si no encontramos donde mostrar el error
-          alert(errorMsg);
-        }
-      });
-  });
+        // Auto-eliminar después de 10 segundos
+        setTimeout(() => {
+          if (errorElement.parentNode) {
+            errorElement.remove();
+          }
+        }, 10000);
+      } else {
+        // Si no hay columna derecha, usar alert
+        alert(errorMsg);
+      }
+    });
+});
 
   function mostrarErrorEnCanvas(msg){
     const colLeft = document.querySelector('.col-left');
