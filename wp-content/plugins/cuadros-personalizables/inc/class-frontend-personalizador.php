@@ -444,59 +444,53 @@ public function validar_personalizacion($passed, $product_id) {
   return $passed;
 }
 
-/**
- * Agregar datos personalizados al carrito
- */
 public function agregar_datos_personalizados_al_carrito($cart_item_data, $product_id) {
-  $mockup_url = get_post_meta($product_id, '_mockup_url', true);
-  
-  if (empty($mockup_url)) {
-      return $cart_item_data; // No es un producto personalizable
+    $mockup_url = get_post_meta($product_id, '_mockup_url', true);
+    
+    if (empty($mockup_url)) {
+        return $cart_item_data; // No es un producto personalizable
+    }
+    
+    // Método nuevo: usar ID de personalización (prioridad)
+    if (!empty($_POST['personalizacion_id'])) {
+        $personalizacion_id = intval($_POST['personalizacion_id']);
+        
+        if (class_exists('CuadrosPersonalizables_DB')) {
+            $db = CuadrosPersonalizables_DB::get_instance();
+            $personalizacion = $db->get_personalization_by_id($personalizacion_id);
+            
+            if ($personalizacion) {
+                // Guardar ID y URL de imagen
+                $cart_item_data['personalizacion_id'] = $personalizacion_id;
+                
+                // Si existe image_url usamos esa, si no, intentamos image_data para compatibilidad
+                if (!empty($personalizacion->image_url)) {
+                    $cart_item_data['img_personalizada'] = $personalizacion->image_url;
+                } elseif (!empty($personalizacion->image_data)) {
+                    $cart_item_data['img_personalizada'] = $personalizacion->image_data;
+                }
+                
+                $cart_item_data['estado_personalizacion'] = $personalizacion->image_state;
+                
+                // Agregar hash único para evitar combinar items
+                $cart_item_data['unique_key'] = md5(microtime().rand());
+                
+                return $cart_item_data;
+            }
+        }
+    }
+    
+    // Método antiguo: usar imagen directamente
+    if (!empty($_POST['img_personalizada'])) {
+        // Guardar URL o base64 de la imagen
+        $cart_item_data['img_personalizada'] = $_POST['img_personalizada'];
+        
+        // Agregar hash único para evitar combinar items
+        $cart_item_data['unique_key'] = md5(microtime().rand());
+    }
+    
+    return $cart_item_data;
   }
-  
-  // Método nuevo: usar ID de personalización (prioridad)
-  if (!empty($_POST['personalizacion_id'])) {
-      $personalizacion_id = intval($_POST['personalizacion_id']);
-      
-      if (class_exists('CuadrosPersonalizables_DB')) {
-          $db = CuadrosPersonalizables_DB::get_instance();
-          $personalizacion = $db->get_personalization_by_id($personalizacion_id);
-          
-          if ($personalizacion) {
-              // Guardar tanto el ID como la imagen
-              $cart_item_data['personalizacion_id'] = $personalizacion_id;
-              
-              // Verificar que la imagen es una cadena base64 válida
-              if (!empty($personalizacion->image_data) && 
-                  is_string($personalizacion->image_data) && 
-                  strpos($personalizacion->image_data, 'data:image') === 0) {
-                  $cart_item_data['img_personalizada'] = $personalizacion->image_data;
-              } else {
-                  // Crear un placeholder si no hay imagen válida
-                  $cart_item_data['img_personalizada'] = 'data:image/svg+xml;base64,' . base64_encode('<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" font-family="Arial" font-size="12" text-anchor="middle" dominant-baseline="middle" fill="#999">Imagen personalizada</text></svg>');
-              }
-              
-              $cart_item_data['estado_personalizacion'] = $personalizacion->image_state;
-              
-              // Agregar hash único para evitar combinar items
-              $cart_item_data['unique_key'] = md5(microtime().rand());
-              
-              return $cart_item_data;
-          }
-      }
-  }
-  
-  // Método antiguo: usar imagen directamente
-  if (!empty($_POST['img_personalizada']) && strpos($_POST['img_personalizada'], 'data:image') === 0) {
-      // Guardar imagen
-      $cart_item_data['img_personalizada'] = $_POST['img_personalizada'];
-      
-      // Agregar hash único para evitar combinar items
-      $cart_item_data['unique_key'] = md5(microtime().rand());
-  }
-  
-  return $cart_item_data;
-}
 
 /**
  * Muestra la miniatura y los enlaces “Ver / Editar” de la personalización

@@ -42,39 +42,36 @@ class CuadrosPersonalizables_DB {
     /**
      * Crear tablas en la base de datos
      */
-    public function create_tables() {
-        global $wpdb;
-        
-        $charset_collate = $wpdb->get_charset_collate();
-        
-        $sql = "CREATE TABLE $this->table_name (
-            id mediumint(9) NOT NULL AUTO_INCREMENT,
-            product_id bigint(20) NOT NULL,
-            user_id bigint(20) NOT NULL,
-            session_id varchar(255) NOT NULL,
-            image_data longtext NOT NULL,
-            image_state longtext NOT NULL,
-            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            PRIMARY KEY  (id)
-        ) $charset_collate;";
-        
-        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-        dbDelta($sql);
-    }
+public function create_tables() {
+    global $wpdb;
     
-    /**
-     * Guardar personalización
-     * 
-     * @param int $product_id ID del producto
-     * @param string $image_data Datos de la imagen (Base64)
-     * @param string $image_state Estado de la imagen (JSON)
-     * @return int ID de la personalización
-     */
-    /**
- * Guardar personalización vía AJAX
+    $charset_collate = $wpdb->get_charset_collate();
+    
+    $sql = "CREATE TABLE $this->table_name (
+        id mediumint(9) NOT NULL AUTO_INCREMENT,
+        product_id bigint(20) NOT NULL,
+        user_id bigint(20) NOT NULL,
+        session_id varchar(255) NOT NULL,
+        image_url text NOT NULL, /* Cambiado de image_data longtext a image_url text */
+        image_state longtext NOT NULL,
+        created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        PRIMARY KEY  (id)
+    ) $charset_collate;";
+    
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+}
+    
+/**
+ * Guardar personalización
+ * 
+ * @param int $product_id ID del producto
+ * @param string $image_url URL de la imagen guardada
+ * @param string $image_state Estado de la imagen (JSON)
+ * @return int ID de la personalización
  */
-public function save_personalization($product_id, $image_data, $image_state) {
+public function save_personalization($product_id, $image_url, $image_state) {
     global $wpdb;
     
     $user_id = get_current_user_id();
@@ -100,7 +97,7 @@ public function save_personalization($product_id, $image_data, $image_state) {
         $wpdb->update(
             $this->table_name,
             array(
-                'image_data' => $image_data,
+                'image_url' => $image_url, // Usamos image_url en lugar de image_data
                 'image_state' => $image_state,
                 'updated_at' => current_time('mysql')
             ),
@@ -115,7 +112,7 @@ public function save_personalization($product_id, $image_data, $image_state) {
                 'product_id' => $product_id,
                 'user_id' => $user_id,
                 'session_id' => $session_id,
-                'image_data' => $image_data,
+                'image_url' => $image_url, // Usamos image_url en lugar de image_data
                 'image_state' => $image_state,
                 'created_at' => current_time('mysql'),
                 'updated_at' => current_time('mysql')

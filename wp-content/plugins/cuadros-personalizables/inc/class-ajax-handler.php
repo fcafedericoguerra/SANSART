@@ -50,20 +50,19 @@ public function save_personalization() {
         return;
     }
     
-    // Dentro de la función save_personalization, justo antes de guardar en la base de datos
-// Asegurarse de que image_data sea una cadena base64 válida
-if (empty($image_data) || strpos($image_data, 'data:image') !== 0) {
-    wp_send_json_error('Error: Datos de imagen inválidos o con formato incorrecto');
-    return;
-}
-
-// Verificar que la cadena base64 no esté corrupta
-$base64_data = substr($image_data, strpos($image_data, ',') + 1);
-$decoded = base64_decode($base64_data, true);
-if ($decoded === false) {
-    wp_send_json_error('Error: La imagen está corrupta. Por favor, inténtalo nuevamente.');
-    return;
-}
+    // Asegurarse de que image_data sea una cadena base64 válida
+    if (empty($image_data) || strpos($image_data, 'data:image') !== 0) {
+        wp_send_json_error('Error: Datos de imagen inválidos o con formato incorrecto');
+        return;
+    }
+    
+    // Verificar que la cadena base64 no esté corrupta
+    $base64_data = substr($image_data, strpos($image_data, ',') + 1);
+    $decoded = base64_decode($base64_data, true);
+    if ($decoded === false) {
+        wp_send_json_error('Error: La imagen está corrupta. Por favor, inténtalo nuevamente.');
+        return;
+    }
     
     if (empty($image_state)) {
         wp_send_json_error('Error: Estado de imagen vacío');
@@ -74,6 +73,13 @@ if ($decoded === false) {
     $product = wc_get_product($product_id);
     if (!$product) {
         wp_send_json_error('El producto especificado no existe');
+        return;
+    }
+    
+    // Convertir base64 a archivo y guardar
+    $image_url = $this->save_image_to_file($image_data, $product_id);
+    if (!$image_url) {
+        wp_send_json_error('Error al guardar la imagen en el servidor.');
         return;
     }
     
@@ -109,11 +115,13 @@ if ($decoded === false) {
         }
         
         $db = CuadrosPersonalizables_DB::get_instance();
-        $id = $db->save_personalization($product_id, $image_data, $image_state);
+        // Ahora pasamos image_url en lugar de image_data
+        $id = $db->save_personalization($product_id, $image_url, $image_state);
         
         if ($id) {
             wp_send_json_success(array(
                 'id' => $id,
+                'image_url' => $image_url, // Devolvemos la URL en lugar de data
                 'message' => 'Personalización guardada exitosamente'
             ));
         } else {
@@ -124,6 +132,59 @@ if ($decoded === false) {
         error_log('Excepción al guardar personalización: ' . $e->getMessage());
         wp_send_json_error('Error del sistema: ' . $e->getMessage());
     }
+}
+
+/**
+ * Convierte y guarda una imagen base64 como archivo
+ * 
+ * @param string $base64_data La imagen en formato base64
+ * @param int $product_id ID del producto
+ * @return string|false La URL de la imagen guardada o false si hay error
+ */
+private function save_image_to_file($base64_data, $product_id) {
+    // Verificar que es una cadena base64 válida
+    if (strpos($base64_data, 'data:image') !== 0) {
+        return false;
+    }
+    
+    // Extraer datos y tipo de imagen
+    $image_parts = explode(';base64,', $base64_data);
+    if (count($image_parts) != 2) {
+        return false;
+    }
+    
+    $image_type_aux = explode('image/', $image_parts[0]);
+    $image_type = isset($image_type_aux[1]) ? $image_type_aux[1] : 'png';
+    $image_base64 = $image_parts[1];
+    
+    // Decodificar la imagen
+    $image_data = base64_decode($image_base64);
+    if (!$image_data) {
+        return false;
+    }
+    
+    // Obtener directorio de uploads
+    $upload_dir = wp_upload_dir();
+    $upload_path = $upload_dir['basedir'] . '/personalizados/';
+    $upload_url = $upload_dir['baseurl'] . '/personalizados/';
+    
+    // Crear directorio si no existe
+    if (!file_exists($upload_path)) {
+        wp_mkdir_p($upload_path);
+        
+        // Crear archivo index.php para proteger el directorio
+        file_put_contents($upload_path . 'index.php', '<?php // Silence is golden');
+    }
+    
+    // Generar nombre único de archivo
+    $filename = 'personalizado_' . $product_id . '_' . time() . '.' . $image_type;
+    $file_path = $upload_path . $filename;
+    $file_url = $upload_url . $filename;
+    
+    // Guardar la imagen
+    $saved = file_put_contents($file_path, $image_data);
+    
+    return $saved ? $file_url : false;
 }
     
     /**

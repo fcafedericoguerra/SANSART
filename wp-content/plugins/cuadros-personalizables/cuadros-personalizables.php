@@ -210,6 +210,88 @@ function cpc_mostrar_aviso_diagnostico() {
 }
 add_action('admin_notices', 'cpc_mostrar_aviso_diagnostico');
 
+
+/**
+ * Actualizar tabla para usar image_url en lugar de image_data
+ */
+function cpc_actualizar_tabla_personalizacion() {
+    global $wpdb;
+    $tabla = $wpdb->prefix . 'cuadros_personalizados';
+    
+    // Verificar si ya existe la columna image_url
+    $columna_existe = $wpdb->get_results("SHOW COLUMNS FROM {$tabla} LIKE 'image_url'");
+    
+    if (empty($columna_existe)) {
+        // Añadir nueva columna image_url
+        $wpdb->query("ALTER TABLE {$tabla} ADD COLUMN image_url text NOT NULL AFTER session_id");
+        
+        // Migrar datos si hay registros existentes (esto sería temporal)
+        // Este proceso podría ser pesado si hay muchos registros, considera hacerlo por lotes
+        $registros = $wpdb->get_results("SELECT id, image_data FROM {$tabla} WHERE image_data != ''");
+        
+        if (!empty($registros)) {
+            foreach ($registros as $registro) {
+                if (!empty($registro->image_data) && strpos($registro->image_data, 'data:image') === 0) {
+                    // Aquí llamarías a una función para convertir y guardar la imagen
+                    // Pero como esto está fuera del contexto de la clase, usaremos un enfoque diferente
+                    
+                    // Extraer tipo y datos
+                    $image_parts = explode(';base64,', $registro->image_data);
+                    if (count($image_parts) == 2) {
+                        $image_type_aux = explode('image/', $image_parts[0]);
+                        $image_type = isset($image_type_aux[1]) ? $image_type_aux[1] : 'png';
+                        $image_base64 = $image_parts[1];
+                        
+                        // Decodificar
+                        $image_data = base64_decode($image_base64);
+                        
+                        // Obtener directorio de uploads
+                        $upload_dir = wp_upload_dir();
+                        $upload_path = $upload_dir['basedir'] . '/personalizados/';
+                        $upload_url = $upload_dir['baseurl'] . '/personalizados/';
+                        
+                        // Crear directorio si no existe
+                        if (!file_exists($upload_path)) {
+                            wp_mkdir_p($upload_path);
+                            file_put_contents($upload_path . 'index.php', '<?php // Silence is golden');
+                        }
+                        
+                        // Guardar archivo
+                        $filename = 'personalizado_migrado_' . $registro->id . '_' . time() . '.' . $image_type;
+                        $file_path = $upload_path . $filename;
+                        $file_url = $upload_url . $filename;
+                        
+                        if (file_put_contents($file_path, $image_data)) {
+                            // Actualizar registro con la URL
+                            $wpdb->update(
+                                $tabla,
+                                array('image_url' => $file_url),
+                                array('id' => $registro->id)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Opcional: Eliminar la columna image_data después de migrar
+        // Esto depende de si quieres mantener compatibilidad con versiones anteriores
+        // $wpdb->query("ALTER TABLE {$tabla} DROP COLUMN image_data");
+    }
+}
+
+// Registrar función para ejecutar durante la activación o actualización
+add_action('plugins_loaded', function() {
+    $db_version = get_option('cpc_db_version', '0');
+    
+    // Si la versión es anterior a la actual, actualizar
+    if (version_compare($db_version, CPC_DB_VERSION, '<')) {
+        cpc_actualizar_tabla_personalizacion();
+        
+        // Actualizar versión
+        update_option('cpc_db_version', CPC_DB_VERSION);
+    }
+});
 /**
  * Verificación de depuración para mostrar mensajes cuando algo no carga correctamente
  */

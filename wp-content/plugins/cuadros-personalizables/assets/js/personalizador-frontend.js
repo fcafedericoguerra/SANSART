@@ -84,26 +84,64 @@ const rawArea = { ...areaObj };
   }
 
   /* ------------------------------- Canvas init ------------------------------- */
-  function initCanvas(){
-    if (fabricCanvas){ fabricCanvas.clear(); fabricCanvas.dispose(); }
-    const canvasElement = document.getElementById("mockupCanvas");
-    if (!canvasElement){ console.error("<canvas> no encontrado"); return null; }
-
-    const fixedWidth = 800, fixedHeight = 600;
-    canvasElement.width  = fixedWidth;
-    canvasElement.height = fixedHeight;
-    canvasElement.style.width  = fixedWidth  + "px";
-    canvasElement.style.height = fixedHeight + "px";
-
-    fabricCanvas = new fabric.Canvas("mockupCanvas", {
-      width: fixedWidth,
-      height: fixedHeight,
-      preserveObjectStacking: true,
-      selection: false
-    });
-    window.fabricCanvas = fabricCanvas;
-    return fabricCanvas;
+  /**
+ * Inicializa el canvas con configuración óptima
+ * @returns {Object} El canvas de Fabric.js inicializado
+ */
+function initCanvas() {
+  // Limpieza si ya existe
+  if (fabricCanvas) {
+    fabricCanvas.clear();
+    fabricCanvas.dispose();
   }
+  
+  // Elemento del canvas
+  const canvasElement = document.getElementById("mockupCanvas");
+  if (!canvasElement) {
+    console.error("Error: Canvas no encontrado");
+    return null;
+  }
+  
+  // Dimensiones fijas para mejor rendimiento
+  const fixedWidth = 800;
+  const fixedHeight = 600;
+  
+  // Establecer dimensiones
+  canvasElement.width = fixedWidth;
+  canvasElement.height = fixedHeight;
+  
+  // Dimensiones CSS para evitar deformación
+  canvasElement.style.width = fixedWidth + "px";
+  canvasElement.style.height = fixedHeight + "px";
+  
+  // Crear canvas de Fabric
+  fabricCanvas = new fabric.Canvas("mockupCanvas", {
+    width: fixedWidth,
+    height: fixedHeight,
+    preserveObjectStacking: true,
+    selection: false,
+    centeredScaling: true,
+    centeredRotation: true,
+    uniformScaling: true
+  });
+  
+  // Guardar referencia global
+  window.fabricCanvas = fabricCanvas;
+  
+  // Configurar eventos del canvas
+  fabricCanvas.on('mouse:down', function(opt) {
+    const pointer = fabricCanvas.getPointer(opt.e);
+    console.log('Click en canvas:', pointer);
+  });
+  
+  // Mensaje de diagnóstico
+  console.log("Canvas inicializado:", {
+    width: fabricCanvas.width,
+    height: fabricCanvas.height
+  });
+  
+  return fabricCanvas;
+}
 
   /* ----------------------------- Cargar mock‑up ----------------------------- */
   function cargarMockup(url) {
@@ -175,90 +213,199 @@ const rawArea = { ...areaObj };
   }
   
   /* -------------------------- Zoom & movimiento cover ------------------------- */
-  function limitarMovimientoCover(img, area, canvas){
-    if(!img || !area) return;
-    const bound = img.getBoundingRect(true,true);
-    const minLeft = area.x + area.width  - bound.width ;
-    const maxLeft = area.x;
-    const minTop  = area.y + area.height - bound.height;
-    const maxTop  = area.y;
-    if(bound.width < area.width){ img.scaleX *= area.width / bound.width; img.scaleY = img.scaleX; }
-    if(bound.height< area.height){ img.scaleX *= area.height/ bound.height; img.scaleY = img.scaleX; }
-    if(img.left < minLeft) img.left = minLeft;
-    if(img.left > maxLeft) img.left = maxLeft;
-    if(img.top  < minTop ) img.top  = minTop;
-    if(img.top  > maxTop ) img.top  = maxTop;
+  /**
+ * Versión mejorada de limitarMovimientoCover que mantiene la imagen dentro del área
+ * @param {Object} img - La imagen de Fabric.js
+ * @param {Object} area - El área editable
+ * @param {Object} canvas - El canvas de Fabric.js
+ */
+function limitarMovimientoCover(img, area, canvas) {
+  if (!img || !area) return;
+  
+  // Obtener el rectángulo de límites considerando rotación
+  const bound = img.getBoundingRect(true, true);
+  
+  // Verificar si la imagen es lo suficientemente grande
+  let needsRescale = false;
+  let scaleFactor = 1;
+  
+  // Si alguna dimensión es menor que el área, necesitamos escalar
+  if (bound.width < area.width) {
+    scaleFactor = Math.max(scaleFactor, area.width / bound.width * 1.05);
+    needsRescale = true;
   }
+  
+  if (bound.height < area.height) {
+    scaleFactor = Math.max(scaleFactor, area.height / bound.height * 1.05);
+    needsRescale = true;
+  }
+  
+  // Si necesitamos reescalar, hacerlo y centrar
+  if (needsRescale) {
+    img.scaleX *= scaleFactor;
+    img.scaleY *= scaleFactor;
+    
+    // Centrar después de escalar
+    img.left = area.x + area.width / 2;
+    img.top = area.y + area.height / 2;
+    
+    // Actualizar coordenadas
+    img.setCoords();
+    return;
+  }
+  
+  // Si la imagen es suficientemente grande, asegurar que cubra el área
+  
+  // Verificar si alguna parte del área está descubierta
+  const areaRight = area.x + area.width;
+  const areaBottom = area.y + area.height;
+  const boundRight = bound.left + bound.width;
+  const boundBottom = bound.top + bound.height;
+  
+  // Ajustar posición horizontal
+  if (bound.left > area.x) {
+    // La imagen está demasiado a la derecha
+    img.left -= (bound.left - area.x);
+  } else if (boundRight < areaRight) {
+    // La imagen está demasiado a la izquierda
+    img.left += (areaRight - boundRight);
+  }
+  
+  // Ajustar posición vertical
+  if (bound.top > area.y) {
+    // La imagen está demasiado abajo
+    img.top -= (bound.top - area.y);
+  } else if (boundBottom < areaBottom) {
+    // La imagen está demasiado arriba
+    img.top += (areaBottom - boundBottom);
+  }
+  
+  // Actualizar coordenadas
+  img.setCoords();
+}
+
+  /* -------------------------- ZoomControls ------------------------- */
   function setupZoomControls() {
     if (!zoomSlider) return;
     
-    // Obtener la escala inicial para cubrir el área
-    let initialScale = 1;
-    
-    if (userImg) {
-      const imgWidth = userImg.width || 100;
-      const imgHeight = userImg.height || 100;
-      
-      const scaleX = (areaObj.width / imgWidth) * 1.05;
-      const scaleY = (areaObj.height / imgHeight) * 1.05;
-      
-      initialScale = Math.max(scaleX, scaleY);
+    // Si no hay imagen, desactivar control
+    if (!userImg) {
+      zoomSlider.disabled = true;
+      return;
     }
     
-    // Establecer valor inicial y rango del slider
-    zoomSlider.min = initialScale * 0.5; // 50% del tamaño que cubre el área
-    zoomSlider.max = initialScale * 3;   // 300% del tamaño que cubre el área
-    zoomSlider.value = initialScale;
-    zoomSlider.step = 0.05;
+    // Calcular escala base necesaria para cubrir completamente el área
+    const imgWidth = userImg.width || 100;
+    const imgHeight = userImg.height || 100;
+    
+    const scaleX = (areaObj.width / imgWidth) * 1.05;
+    const scaleY = (areaObj.height / imgHeight) * 1.05;
+    const baseScale = Math.max(scaleX, scaleY);
+    
+    // Configurar slider con incrementos definidos
+    zoomSlider.min = baseScale;     // Mínimo: escala que cubre exactamente el área
+    zoomSlider.max = baseScale * 3; // Máximo: 3 veces la escala base
+    zoomSlider.step = 0.1;          // Incrementos de 0.1 para control preciso
+    zoomSlider.value = userImg.scaleX || baseScale;
     zoomSlider.disabled = false;
-    currentZoom = initialScale;
     
-    // Evento al mover el slider
-    zoomSlider.addEventListener('input', () => {
-      if (userImg) {
-        const z = parseFloat(zoomSlider.value);
-        userImg.scaleX = userImg.scaleY = z;
-        limitarMovimientoCover(userImg, areaObj, fabricCanvas);
-        fabricCanvas.renderAll();
-      }
-    });
+    // Guardar escala base para referencia
+    userImg.baseScale = baseScale;
     
-    // Botones de zoom
+    // Remover manejadores previos para evitar duplicados
+    zoomSlider.removeEventListener('input', zoomSliderHandler);
+    zoomSlider.removeEventListener('change', zoomSliderHandler);
+    
+    // Definir manejador como función nombrada para poder removerlo
+    function zoomSliderHandler() {
+      if (!userImg) return;
+      
+      // Obtener valor del slider, asegurando que sea al menos la escala base
+      const newScale = Math.max(parseFloat(zoomSlider.value), baseScale);
+      
+      // Guardar posición central
+      const centerX = areaObj.x + areaObj.width / 2;
+      const centerY = areaObj.y + areaObj.height / 2;
+      
+      // Aplicar escala
+      userImg.set({
+        scaleX: newScale,
+        scaleY: newScale,
+        left: centerX,
+        top: centerY
+      });
+      
+      // Aplicar recorte
+      aplicarRecorte(userImg);
+      
+      // Renderizar cambios
+      fabricCanvas.renderAll();
+    }
+    
+    // Agregar manejador de eventos
+    zoomSlider.addEventListener('input', zoomSliderHandler);
+    zoomSlider.addEventListener('change', zoomSliderHandler);
+    
+    // Configurar botones de zoom + y -
     if (zoomIn) {
-      zoomIn.onclick = () => {
+      zoomIn.onclick = function() {
         if (!userImg) return;
-        const newZoom = Math.min(parseFloat(zoomSlider.value) + 0.1, zoomSlider.max);
-        zoomSlider.value = newZoom;
-        zoomSlider.dispatchEvent(new Event('input'));
+        
+        // Incremento de 0.1 (un punto de zoom)
+        const newValue = Math.min(parseFloat(zoomSlider.value) + 0.1, zoomSlider.max);
+        zoomSlider.value = newValue;
+        
+        // Disparar evento 'input' manualmente
+        const event = new Event('input', { 'bubbles': true, 'cancelable': true });
+        zoomSlider.dispatchEvent(event);
       };
     }
     
     if (zoomOut) {
-      zoomOut.onclick = () => {
+      zoomOut.onclick = function() {
         if (!userImg) return;
-        const newZoom = Math.max(parseFloat(zoomSlider.value) - 0.1, zoomSlider.min);
-        zoomSlider.value = newZoom;
-        zoomSlider.dispatchEvent(new Event('input'));
+        
+        // Decremento de 0.1 (un punto de zoom), pero nunca menor que baseScale
+        const newValue = Math.max(parseFloat(zoomSlider.value) - 0.1, baseScale);
+        zoomSlider.value = newValue;
+        
+        // Disparar evento 'input' manualmente
+        const event = new Event('input', { 'bubbles': true, 'cancelable': true });
+        zoomSlider.dispatchEvent(event);
       };
     }
     
-    // Agregar botón de reseteo (si no existe)
-    const zoomControl = document.querySelector('.zoom-control');
-    if (zoomControl && !document.getElementById('zoom-reset')) {
-      const resetBtn = document.createElement('button');
-      resetBtn.id = 'zoom-reset';
-      resetBtn.type = 'button';
-      resetBtn.className = 'zoom-reset-btn';
-      resetBtn.innerHTML = '↺';
-      resetBtn.title = 'Restablecer zoom';
-      resetBtn.style.cssText = 'margin-left: 10px; width: 30px; height: 30px; border-radius: 50%; border: 1px solid #ddd; background: #f7f7f7; cursor: pointer;';
-      
-      // Insertar después del control de zoom
-      zoomControl.appendChild(resetBtn);
-      
-      // Evento de clic
-      resetBtn.onclick = resetearZoom;
-    }
+    // Agregar botón de reset
+    agregarBotonResetZoom(baseScale);
+  }
+
+  /* ------------------------ Aplicar recorte y centrado ----------------------- */
+  function aplicarRecorteYCentrado() {
+  if (!userImg || !areaObj || !fabricCanvas) return;
+  
+  // Calcular centro del área editable
+  const centerX = areaObj.x + areaObj.width / 2;
+  const centerY = areaObj.y + areaObj.height / 2;
+  
+  // Forzar centrado
+  userImg.set({
+    left: centerX,
+    top: centerY,
+    originX: 'center',
+    originY: 'center'
+  });
+  
+  // Aplicar recorte al área exacta
+  userImg.clipPath = new fabric.Rect({
+    left: areaObj.x,
+    top: areaObj.y,
+    width: areaObj.width,
+    height: areaObj.height,
+    absolutePositioned: true
+  });
+  
+  // Actualizar coordenadas internas
+  userImg.setCoords();
   }
 
   /* ---------------------- DPI helpers / tamaño variación ---------------------- */
@@ -267,6 +414,8 @@ const rawArea = { ...areaObj };
     if(sel&&sel.value){ const m=sel.value.match(/(\d+)\s*[x×]\s*(\d+)/i); if(m) return `${m[1]}x${m[2]}`; }
     return "30x30";
   }
+
+  /* ----------------- Verificar resolución al cambiar variación ---------------- */
   document.addEventListener('change',e=>{
     if(e.target.matches('select[name^="attribute_"][name*="tamano" i]') && userImg){ verificarResolucion({ width:userImg.width, height:userImg.height }); }
   });
@@ -312,87 +461,75 @@ const rawArea = { ...areaObj };
   
     return ok;
   }
-  
 
   /* ------------------------------ Guardar AJAX ------------------------------- */
   function guardarPersonalizacion() {
-    // Verificar que tenemos imagen para guardar
-    if (!userImg) {
-      console.error('Error: No hay imagen para guardar');
-      return Promise.reject('No hay imagen para guardar');
-    }
+    if (!userImg) 
+      return Promise.reject('No hay imagen');
     
-    // Verificar canvas
-    if (!fabricCanvas) {
-      console.error('Error: Canvas no disponible');
-      return Promise.reject('Canvas no disponible');
-    }
+    // Generar imagen final como base64 para enviar al servidor
+    const finalImg = fabricCanvas.toDataURL({ format: 'png', quality: 1 });
     
-    try {
-      // Generar imagen final con alta calidad
-      const finalImg = fabricCanvas.toDataURL({
-        format: 'png',
-        quality: 1,
-        multiplier: 2 // Para mejor resolución
-      });
-      
-      // Crear objeto con estado simple y limpio para evitar problemas de JSON
-      const imageState = {
-        left: Math.round(userImg.left),
-        top: Math.round(userImg.top),
-        scaleX: parseFloat(userImg.scaleX.toFixed(4)),
-        scaleY: parseFloat(userImg.scaleY.toFixed(4)),
-        angle: parseFloat((userImg.angle || 0).toFixed(2)),
-        areaSimple: { 
-          x: Math.round(areaObj.x), 
-          y: Math.round(areaObj.y), 
-          width: Math.round(areaObj.width), 
-          height: Math.round(areaObj.height) 
-        }
-      };
-      
-      // Mejor manejo de errores
-      console.log('Preparando para guardar personalización');
-      
-      return new Promise((resolve, reject) => {
-        jQuery.ajax({
-          url: ajaxUrl,
-          type: 'POST',
-          data: {
-            action: 'save_personalization',
-            security: nonce,
-            product_id: productId,
-            image_data: finalImg,
-            image_state: JSON.stringify(imageState)
-          },
-          dataType: 'json',
-          success: function(response) {
-            if (response && response.success) {
-              console.log('Guardado exitoso:', response.data);
-              resolve(response.data);
-            } else {
-              console.error('Error en respuesta:', response);
-              reject(response && response.data ? response.data : 'Error al guardar');
-            }
-          },
-          error: function(xhr, status, error) {
-            console.error('Error AJAX:', status, error);
-            console.log('Respuesta del servidor:', xhr.responseText);
-            reject('Error de conexión. Intenta nuevamente.');
+    // Incluimos areaSimple y dimensiones de canvas para la recarga exacta
+    const imageState = {
+      left: userImg.left,
+      top: userImg.top,
+      scaleX: userImg.scaleX,
+      scaleY: userImg.scaleY,
+      angle: userImg.angle || 0,
+      areaSimple: { 
+        x: areaObj.x, 
+        y: areaObj.y, 
+        width: areaObj.width, 
+        height: areaObj.height 
+      },
+      canvasDimensions: {
+        width: fabricCanvas.width,
+        height: fabricCanvas.height
+      }
+    };
+    
+    return new Promise((resolve, reject) => {
+      jQuery.post(ajaxUrl, {
+        action: 'save_personalization',
+        security: nonce,
+        product_id: productId,
+        image_data: finalImg,
+        image_state: JSON.stringify(imageState)
+      }, res => {
+        if (res.success) {
+          console.log('Personalización guardada con éxito:', res.data);
+          
+          // Ahora el servidor devuelve image_url en lugar de image_data
+          if (inputHidden) {
+            // Actualizar el campo oculto con la URL en lugar del base64
+            inputHidden.value = res.data.image_url;
           }
-        });
+          
+          // Actualizar también el campo de ID
+          if (personalizacionIdField) {
+            personalizacionIdField.value = res.data.id;
+          }
+          
+          resolve(res.data);
+        } else {
+          console.error('Error al guardar la personalización:', res.data);
+          reject(res.data);
+        }
+      })
+      .fail(err => {
+        console.error('Error AJAX:', err);
+        reject(err);
       });
-    } catch (error) {
-      console.error('Error al preparar datos:', error);
-      return Promise.reject('Error al preparar imagen para guardar');
-    }
+    });
   }
   
-
   /* --------------------------- Personalización previa ------------------------- */
   function cargarPersonalizacion(extra={}){
     return jQuery.post(ajaxUrl,{ action:'load_personalization', product_id:productId, security:nonce, ...extra });
   }
+
+  /* -------------------------- CargarPerzonalización ------------------------- */
   function cargarPersonalizacionGuardada(){
     if (!personalizacionId) 
       return Promise.resolve();
@@ -465,41 +602,38 @@ function mostrarImagenPrevisualizada(imageData, state) {
   });
 }
 
-
-
-
   /* -------------------------- Colocar imagen en área -------------------------- */
+  /**
+ * Coloca la imagen dentro del área editable y configura el recorte
+ * @param {Object} img - La imagen de Fabric.js
+ */
   function colocarImagenEnArea(img) {
-    // Verificar que tenemos datos válidos
-    if (!img || !areaObj || !fabricCanvas) {
-      console.error("Datos incompletos para colocar imagen");
-      return;
-    }
-  
+    if (!img || !areaObj || !fabricCanvas) return;
+    
     try {
-      // Calcular centro exacto del área editable
+      // Calcular centro del área editable
       const cx = areaObj.x + areaObj.width / 2;
       const cy = areaObj.y + areaObj.height / 2;
       
-      // Guardar dimensiones originales
+      // Dimensiones originales de la imagen
       const imgWidth = img.width || 100;
       const imgHeight = img.height || 100;
       
-      // Calcular factor de escala para cubrir el área
-      const scaleX = (areaObj.width / imgWidth) * 1.05; // 5% extra para cubrir bien
+      // Calcular escala para cubrir el área con margen
+      const scaleX = (areaObj.width / imgWidth) * 1.05;
       const scaleY = (areaObj.height / imgHeight) * 1.05;
-      
-      // Usar la escala mayor para asegurar que toda el área quede cubierta
       const scale = Math.max(scaleX, scaleY);
       
-      console.log("Posicionando imagen:", {
-        centro: { x: cx, y: cy },
+      // Guardar escala base como propiedad
+      img.baseScale = scale;
+      
+      console.log("Colocando imagen:", {
+        area: { x: areaObj.x, y: areaObj.y, width: areaObj.width, height: areaObj.height },
         imagen: { width: imgWidth, height: imgHeight },
-        area: areaObj,
         escala: scale
       });
       
-      // Configurar imagen con parámetros precisos
+      // Configurar imagen
       img.set({
         left: cx,
         top: cy,
@@ -509,7 +643,7 @@ function mostrarImagenPrevisualizada(imageData, state) {
         scaleY: scale
       });
       
-      // Aplicar clipPath al área exacta
+      // Aplicar recorte
       img.clipPath = new fabric.Rect({
         left: areaObj.x,
         top: areaObj.y,
@@ -518,70 +652,322 @@ function mostrarImagenPrevisualizada(imageData, state) {
         absolutePositioned: true
       });
       
-      // Actualizar coordenadas internas
+      // Actualizar coordenadas
       img.setCoords();
       
-      // Guardar como escala base para el zoom
-      if (zoomSlider) {
-        zoomSlider.value = scale;
-        currentZoom = scale;
-        zoomSlider.min = scale * 0.5;
-        zoomSlider.max = scale * 3;
-        zoomSlider.disabled = false;
-      }
+      // Configurar zoom
+      setupZoomControls();
       
       // Renderizar canvas
       fabricCanvas.renderAll();
     } catch (error) {
-      console.error("Error al posicionar imagen:", error);
+      console.error("Error al colocar imagen en área:", error);
     }
   }
 
    /* -------------------------- Controles de zoom -------------------------- */
-function resetearZoom() {
+/**
+ * Resetea el zoom al valor base que cubra el área
+ * @param {Number} baseScale - Escala base, si se proporciona
+ */
+function resetearZoom(baseScale) {
   if (!userImg || !areaObj || !fabricCanvas) return;
   
-  // Calcular escala original para cubrir el área
-  const imgWidth = userImg.width || 100;
-  const imgHeight = userImg.height || 100;
+  // Calcular escala base si no se proporciona
+  if (!baseScale) {
+    const imgWidth = userImg.width || 100;
+    const imgHeight = userImg.height || 100;
+    
+    const scaleX = (areaObj.width / imgWidth) * 1.05;
+    const scaleY = (areaObj.height / imgHeight) * 1.05;
+    baseScale = Math.max(scaleX, scaleY);
+  }
   
-  // Calcular escalas para ancho y alto
-  const scaleX = (areaObj.width / imgWidth) * 1.05;
-  const scaleY = (areaObj.height / imgHeight) * 1.05;
+  // Calcular centro del área
+  const centerX = areaObj.x + areaObj.width / 2;
+  const centerY = areaObj.y + areaObj.height / 2;
   
-  // Usar la escala mayor para asegurar que toda el área quede cubierta
-  const scale = Math.max(scaleX, scaleY);
-  
-  // Aplicar escala
+  // Aplicar escala base y centrar
   userImg.set({
-    scaleX: scale,
-    scaleY: scale
+    scaleX: baseScale,
+    scaleY: baseScale,
+    left: centerX,
+    top: centerY,
+    originX: 'center',
+    originY: 'center'
   });
   
-  // Centrar la imagen
-  const cx = areaObj.x + areaObj.width / 2;
-  const cy = areaObj.y + areaObj.height / 2;
+  // Aplicar recorte
+  aplicarRecorte(userImg);
   
-  userImg.set({
-    left: cx,
-    top: cy
-  });
-  
-  // Actualizar slider de zoom si existe
+  // Actualizar slider si existe
   if (zoomSlider) {
-    zoomSlider.value = scale;
-    currentZoom = scale;
+    zoomSlider.value = baseScale;
   }
   
   // Actualizar canvas
   fabricCanvas.renderAll();
+  
+  console.log("Zoom reseteado a escala base:", baseScale);
 }
+/**
+ * Agrega un botón para resetear el zoom al valor base
+ * @param {Number} baseScale - La escala base que cubre el área
+ */
+function agregarBotonResetZoom(baseScale) {
+  // Verificar si ya existe
+  if (document.getElementById('zoom-reset')) return;
+  
+  // Buscar el contenedor de zoom
+  const zoomControl = document.querySelector('.zoom-control');
+  if (!zoomControl) return;
+  
+  // Crear botón
+  const resetBtn = document.createElement('button');
+  resetBtn.id = 'zoom-reset';
+  resetBtn.type = 'button';
+  resetBtn.className = 'zoom-reset-btn';
+  resetBtn.innerHTML = '↺';
+  resetBtn.title = 'Restablecer zoom';
+  resetBtn.style.cssText = `
+    margin-left: 10px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid #ddd;
+    background: #f7f7f7;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+  `;
+  
+  // Añadir al DOM después del slider
+  const sliderContainer = zoomControl.querySelector('.zoom-slider-container');
+  if (sliderContainer) {
+    sliderContainer.appendChild(resetBtn);
+  } else {
+    zoomControl.appendChild(resetBtn);
+  }
+  
+  // Evento de clic - usar una función que conozca la escala base
+  resetBtn.onclick = function() {
+    resetearZoom(baseScale);
+  };
+  
+  // Efectos visuales
+  resetBtn.onmouseover = function() {
+    this.style.transform = 'rotate(-45deg)';
+  };
+  
+  resetBtn.onmouseout = function() {
+    this.style.transform = 'rotate(0)';
+  };
+}
+
   function setupImageControls(img){
     img.setControlsVisibility({ mt:false,mb:false,ml:false,mr:false, bl:false,br:false,tl:false,tr:false, mtr:true });
     [ 'moving','rotating','scaling','modified' ].forEach(evt=> img.on(evt,()=>limitarMovimientoCover(img,areaObj,fabricCanvas)) );
     fabricCanvas.setActiveObject(img);
   }
 
+  /**
+ * Configura los controles y eventos de la imagen para mantenerla dentro del área
+ * @param {Object} img - La imagen de Fabric.js
+ */
+  function setupImageControls(img) {
+  if (!img || !areaObj || !fabricCanvas) return;
+  
+  // Mostrar solo los controles necesarios
+  img.setControlsVisibility({ 
+    mt: false, mb: false, ml: false, mr: false, 
+    bl: false, br: false, tl: false, tr: false, 
+    mtr: true // Solo mantener rotación
+  });
+  
+  // Configuración de controles
+  img.cornerColor = 'rgba(102,153,255,0.8)';
+  img.cornerStyle = 'circle';
+  img.cornerSize = 12;
+  img.transparentCorners = false;
+  
+  // Eliminar manejadores previos para evitar duplicados
+  img.off('moving');
+  img.off('moved');
+  img.off('rotating');
+  img.off('scaled');
+  img.off('modified');
+  
+  // Evento durante el movimiento - actualizar en tiempo real
+  img.on('moving', function() {
+    constrainMovement(this);
+  });
+  
+  // Evento después del movimiento - ajuste final
+  img.on('moved', function() {
+    // Forzar que esté dentro de los límites
+    constrainMovement(this, true);
+    
+    // Mantener recorte
+    aplicarRecorte(this);
+    
+    // Actualizar canvas
+    fabricCanvas.renderAll();
+  });
+  
+  // Evento durante rotación
+  img.on('rotating', function() {
+    // Mantener centrado
+    const centerX = areaObj.x + areaObj.width / 2;
+    const centerY = areaObj.y + areaObj.height / 2;
+    
+    this.set({
+      left: centerX,
+      top: centerY
+    });
+    
+    // Actualizar recorte
+    aplicarRecorte(this);
+  });
+  
+  // Evento durante escalado
+  img.on('scaling', function() {
+    constrainMovement(this);
+    aplicarRecorte(this);
+  });
+  
+  // Después de cualquier modificación
+  img.on('modified', function() {
+    constrainMovement(this, true);
+    aplicarRecorte(this);
+    fabricCanvas.renderAll();
+  });
+  
+  // Hacer la imagen el objeto activo
+  fabricCanvas.setActiveObject(img);
+}
+
+/**
+ * Restringe el movimiento de la imagen para mantenerla dentro del área editable
+ * @param {Object} img - La imagen de Fabric.js
+ * @param {Boolean} force - Forzar ajuste incluso si está en los límites
+ */
+function constrainMovement(img, force = false) {
+  if (!img || !areaObj) return;
+  
+  // Obtener rectángulo de límites considerando rotación
+  const imgBounds = img.getBoundingRect(true, true);
+  
+  // Calcular centro del área editable
+  const areaCenterX = areaObj.x + areaObj.width / 2;
+  const areaCenterY = areaObj.y + areaObj.height / 2;
+  
+  // Si la imagen es demasiado pequeña, forzar escala base
+  if (imgBounds.width < areaObj.width || imgBounds.height < areaObj.height) {
+    // Calcular escala base
+    const baseScale = img.baseScale || calculateBaseScale(img);
+    
+    // Centrar y aplicar escala base
+    img.set({
+      scaleX: baseScale,
+      scaleY: baseScale,
+      left: areaCenterX,
+      top: areaCenterY
+    });
+    
+    // Actualizar coordenadas
+    img.setCoords();
+    
+    // Actualizar slider si existe
+    if (zoomSlider) {
+      zoomSlider.value = baseScale;
+    }
+    
+    return;
+  }
+  
+  // Para imágenes suficientemente grandes, verificar cobertura del área
+  
+  // Calcular bordes
+  const areaLeft = areaObj.x;
+  const areaTop = areaObj.y;
+  const areaRight = areaObj.x + areaObj.width;
+  const areaBottom = areaObj.y + areaObj.height;
+  
+  // Variables para ajustes
+  let newLeft = img.left;
+  let newTop = img.top;
+  let needsAdjustment = false;
+  
+  // Verificar límites horizontales
+  if (imgBounds.left > areaLeft) {
+    // Imagen demasiado a la derecha
+    newLeft = img.left - (imgBounds.left - areaLeft);
+    needsAdjustment = true;
+  } else if (imgBounds.left + imgBounds.width < areaRight) {
+    // Imagen demasiado a la izquierda
+    newLeft = img.left + (areaRight - (imgBounds.left + imgBounds.width));
+    needsAdjustment = true;
+  }
+  
+  // Verificar límites verticales
+  if (imgBounds.top > areaTop) {
+    // Imagen demasiado abajo
+    newTop = img.top - (imgBounds.top - areaTop);
+    needsAdjustment = true;
+  } else if (imgBounds.top + imgBounds.height < areaBottom) {
+    // Imagen demasiado arriba
+    newTop = img.top + (areaBottom - (imgBounds.top + imgBounds.height));
+    needsAdjustment = true;
+  }
+  
+  // Aplicar ajustes si es necesario
+  if (needsAdjustment || force) {
+    img.set({
+      left: newLeft,
+      top: newTop
+    });
+    
+    // Actualizar coordenadas
+    img.setCoords();
+  }
+}
+
+/**
+ * Calcula la escala base necesaria para cubrir el área
+ * @param {Object} img - La imagen
+ * @returns {Number} La escala base
+ */
+function calculateBaseScale(img) {
+  if (!img || !areaObj) return 1;
+  
+  const imgWidth = img.width || 100;
+  const imgHeight = img.height || 100;
+  
+  const scaleX = (areaObj.width / imgWidth) * 1.05;
+  const scaleY = (areaObj.height / imgHeight) * 1.05;
+  
+  return Math.max(scaleX, scaleY);
+}
+
+/**
+ * Aplica el recorte (clipPath) al área editable
+ * @param {Object} img - La imagen de Fabric.js
+ */
+function aplicarRecorte(img) {
+  if (!img || !areaObj) return;
+  
+  // Crear rectángulo de recorte con las dimensiones exactas del área editable
+  img.clipPath = new fabric.Rect({
+    left: areaObj.x,
+    top: areaObj.y,
+    width: areaObj.width,
+    height: areaObj.height,
+    absolutePositioned: true
+  });
+}
   /* ------------------------ Abrir popup y flujo completo ---------------------- */
   openBtn.addEventListener('click',()=>{
     popup.style.display='block';
