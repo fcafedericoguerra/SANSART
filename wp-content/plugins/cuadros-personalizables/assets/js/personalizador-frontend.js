@@ -465,64 +465,76 @@ function limitarMovimientoCover(img, area, canvas) {
   /* ------------------------------ Guardar AJAX ------------------------------- */
   function guardarPersonalizacion() {
     if (!userImg) 
-      return Promise.reject('No hay imagen');
+        return Promise.reject('No hay imagen');
     
-    // Generar imagen final como base64 para enviar al servidor
-    const finalImg = fabricCanvas.toDataURL({ format: 'png', quality: 1 });
+    // Generar imagen final como PNG para enviar al servidor
+    const finalImg = fabricCanvas.toDataURL({ 
+        format: 'png', 
+        quality: 1,
+        multiplier: 2 // Mejor calidad de exportación
+    });
     
     // Incluimos areaSimple y dimensiones de canvas para la recarga exacta
     const imageState = {
-      left: userImg.left,
-      top: userImg.top,
-      scaleX: userImg.scaleX,
-      scaleY: userImg.scaleY,
-      angle: userImg.angle || 0,
-      areaSimple: { 
-        x: areaObj.x, 
-        y: areaObj.y, 
-        width: areaObj.width, 
-        height: areaObj.height 
-      },
-      canvasDimensions: {
-        width: fabricCanvas.width,
-        height: fabricCanvas.height
-      }
+        left: userImg.left,
+        top: userImg.top,
+        scaleX: userImg.scaleX,
+        scaleY: userImg.scaleY,
+        angle: userImg.angle || 0,
+        areaSimple: { 
+            x: areaObj.x, 
+            y: areaObj.y, 
+            width: areaObj.width, 
+            height: areaObj.height 
+        },
+        canvasDimensions: {
+            width: fabricCanvas.width,
+            height: fabricCanvas.height
+        }
     };
     
     return new Promise((resolve, reject) => {
-      jQuery.post(ajaxUrl, {
-        action: 'save_personalization',
-        security: nonce,
-        product_id: productId,
-        image_data: finalImg,
-        image_state: JSON.stringify(imageState)
-      }, res => {
-        if (res.success) {
-          console.log('Personalización guardada con éxito:', res.data);
-          
-          // Ahora el servidor devuelve image_url en lugar de image_data
-          if (inputHidden) {
-            // Actualizar el campo oculto con la URL en lugar del base64
-            inputHidden.value = res.data.image_url;
-          }
-          
-          // Actualizar también el campo de ID
-          if (personalizacionIdField) {
-            personalizacionIdField.value = res.data.id;
-          }
-          
-          resolve(res.data);
-        } else {
-          console.error('Error al guardar la personalización:', res.data);
-          reject(res.data);
-        }
-      })
-      .fail(err => {
-        console.error('Error AJAX:', err);
-        reject(err);
-      });
+        jQuery.post(ajaxUrl, {
+            action: 'save_personalization',
+            security: nonce,
+            product_id: productId,
+            image_data: finalImg,
+            image_state: JSON.stringify(imageState)
+        }, res => {
+            if (res.success) {
+                console.log('Personalización guardada con éxito:', res.data);
+                
+                // Ahora el servidor devuelve image_url en lugar de image_data
+                if (inputHidden) {
+                    // Actualizar el campo oculto con la URL
+                    inputHidden.value = res.data.image_url || res.data.image_data;
+                }
+                
+                // Actualizar también el campo de ID
+                if (personalizacionIdField) {
+                    personalizacionIdField.value = res.data.id;
+                }
+                
+                // Disparar evento personalizado para notificar que se actualizó
+                document.dispatchEvent(new CustomEvent('personalizacion_actualizada', {
+                    detail: {
+                        id: res.data.id,
+                        image: res.data.image_url || res.data.image_data
+                    }
+                }));
+                
+                resolve(res.data);
+            } else {
+                console.error('Error al guardar la personalización:', res.data);
+                reject(res.data);
+            }
+        })
+        .fail(err => {
+            console.error('Error AJAX:', err);
+            reject(err);
+        });
     });
-  }
+}
   
   /* --------------------------- Personalización previa ------------------------- */
   function cargarPersonalizacion(extra={}){
@@ -530,77 +542,118 @@ function limitarMovimientoCover(img, area, canvas) {
   }
 
   /* -------------------------- CargarPerzonalización ------------------------- */
-  function cargarPersonalizacionGuardada(){
-    if (!personalizacionId) 
-      return Promise.resolve();
-  
-    return cargarPersonalizacion({ id: personalizacionId })
-      .then(res => {
-        if (!res.success) 
-          throw new Error('No hay personalización previa');
+  function cargarPersonalizacionGuardada() {
+    // Si hay datos en window.personalizacionDatos (edición desde carrito)
+    if (window.personalizacionDatos && window.personalizacionDatos.id) {
+        console.log('Cargando desde datos precargados (edición carrito)');
         
-        // Parseamos el JSON que nos devolvió el servidor
-        const state = typeof res.data.image_state === 'string'
-          ? JSON.parse(res.data.image_state)
-          : res.data.image_state;
-  
-        return mostrarImagenPrevisualizada(res.data.image_data, state);
-      })
-      .catch(err => {
-        console.error('Error al cargar personalización previa:', err);
-      });
-  }
-  
+        // Actualizar ID en el campo oculto
+        if (personalizacionIdField) {
+            personalizacionIdField.value = window.personalizacionDatos.id;
+            personalizacionId = window.personalizacionDatos.id;
+        }
+        
+        // Si tiene estado, usar eso
+        if (window.personalizacionDatos.image_state) {
+            const state = typeof window.personalizacionDatos.image_state === 'string'
+                ? JSON.parse(window.personalizacionDatos.image_state)
+                : window.personalizacionDatos.image_state;
+            
+            // Mostrar imagen con estado precargado
+            return mostrarImagenPrevisualizada(window.personalizacionDatos.image_data, state);
+        }
+    }
+    
+    // Usar ID si existe o cargar por producto
+    if (!personalizacionId) 
+        return Promise.resolve();
+    
+    return cargarPersonalizacion({ id: personalizacionId })
+        .then(res => {
+            if (!res.success) 
+                throw new Error('No hay personalización previa');
+            
+            // Parseamos el JSON que nos devolvió el servidor
+            const state = typeof res.data.image_state === 'string'
+                ? JSON.parse(res.data.image_state)
+                : res.data.image_state;
+    
+            return mostrarImagenPrevisualizada(res.data.image_data, state);
+        })
+        .catch(err => {
+            console.error('Error al cargar personalización previa:', err);
+        });
+}
 
   /* ---------------------- Mostrar imagen guardada/base64 ---------------------- */
-  /**
- * @param {string} imageData  Base64 de la imagen
- * @param {object} state      Objeto con left, top, scaleX, scaleY, angle, areaSimple
- */
-/**
- * @param {string} imageData Base64 de la imagen
- * @param {object} state     { left, top, scaleX, scaleY, angle, areaSimple, canvasDimensions }
- */
-function mostrarImagenPrevisualizada(imageData, state) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      // 1) limpia la imagen anterior
-      if (userImg) fabricCanvas.remove(userImg);
-
-      // 2) crea nueva con estado exacto
-      userImg = new fabric.Image(img, {
-        left:    state.left,
-        top:     state.top,
-        scaleX:  state.scaleX,
-        scaleY:  state.scaleY,
-        angle:   state.angle || 0,
-        originX: 'center',
-        originY: 'center',
-        selectable: true,
-        evented:    true
-      });
-      fabricCanvas.add(userImg);
-
-      // 3) clip-path con coords originales
-      const clip = new fabric.Rect({
-        left:               state.areaSimple.x,
-        top:                state.areaSimple.y,
-        width:              state.areaSimple.width,
-        height:             state.areaSimple.height,
-        absolutePositioned: true
-      });
-      userImg.clipPath = clip;
-
-      // 4) reactiva zoom y render
-      setupZoomControls();
-      fabricCanvas.renderAll();
-      resolve();
-    };
-    img.onerror = () => reject('No se pudo cargar la imagen');
-    img.src = imageData;
-  });
-}
+ /**
+ * @param {string} imageData URL o Base64 de la imagen
+  * @param {object} state { left, top, scaleX, scaleY, angle, areaSimple, canvasDimensions }
+  */
+ function mostrarImagenPrevisualizada(imageData, state) {
+     return new Promise((resolve, reject) => {
+         // Verificar si imageData es una URL o base64
+         const isUrl = imageData && (imageData.indexOf('http') === 0);
+         
+         // Función para manejar la carga después de tener la imagen
+         const procesarImagen = (imgElement) => {
+             // 1) limpia la imagen anterior
+             if (userImg) fabricCanvas.remove(userImg);
+ 
+             // 2) crea nueva con estado exacto
+             userImg = new fabric.Image(imgElement, {
+                 left:    state.left,
+                 top:     state.top,
+                 scaleX:  state.scaleX,
+                 scaleY:  state.scaleY,
+                 angle:   state.angle || 0,
+                 originX: 'center',
+                 originY: 'center',
+                 selectable: true,
+                 evented:    true
+             });
+             fabricCanvas.add(userImg);
+ 
+             // 3) clip-path con coords originales
+             const clip = new fabric.Rect({
+                 left:               state.areaSimple.x,
+                 top:                state.areaSimple.y,
+                 width:              state.areaSimple.width,
+                 height:             state.areaSimple.height,
+                 absolutePositioned: true
+             });
+             userImg.clipPath = clip;
+ 
+             // 4) configurar controles y eventos
+             setupImageControls(userImg);
+ 
+             // 5) reactiva zoom y render
+             setupZoomControls();
+             fabricCanvas.renderAll();
+             resolve();
+         };
+         
+         if (isUrl) {
+             // Es una URL, cargar como imagen externa
+             const img = new Image();
+             img.crossOrigin = 'anonymous';
+             img.onload = () => procesarImagen(img);
+             img.onerror = () => {
+                 console.error('Error al cargar la imagen desde URL:', imageData);
+                 reject('No se pudo cargar la imagen desde la URL');
+             };
+             
+             // Agregar parámetro anti-caché
+             img.src = imageData + (imageData.includes('?') ? '&' : '?') + 'nocache=' + Date.now();
+         } else {
+             // Es base64, cargamos directamente
+             const img = new Image();
+             img.onload = () => procesarImagen(img);
+             img.onerror = () => reject('No se pudo cargar la imagen');
+             img.src = imageData;
+         }
+     });
+ }
 
   /* -------------------------- Colocar imagen en área -------------------------- */
   /**
@@ -1077,98 +1130,98 @@ function aplicarRecorte(img) {
 
   /* ------------------------------- Confirmar ------------------------------- */
   // Manejar el botón Confirmar
-document.addEventListener('click', e => {
-  if (!e.target.matches('#confirmar-personalizacion')) return;
-  
-  // Verificar si hay imagen
-  if (!userImg) {
-    alert('Por favor, sube una imagen primero.');
-    return;
-  }
-  
-  // Si el botón está deshabilitado, mostrar mensaje
-  if (e.target.disabled || e.target.classList.contains('disabled')) {
-    alert('La imagen tiene baja resolución. Por favor, sube una imagen de mayor calidad.');
-    return;
-  }
-  
-  // Mostrar indicador de carga
-  mostrarCargando();
-  
-  // Guardar personalización
-  guardarPersonalizacion()
-    .then(data => {
-      console.log('Personalización guardada:', data);
-      
-      // Guardar en campos ocultos
-      if (inputHidden) {
-        inputHidden.value = data.image_data || '';
-      }
-      
-      if (personalizacionIdField && data.id) {
-        personalizacionIdField.value = data.id;
-      }
-      
-      // Actualizar botón personalizar
-      if (openBtn) {
-        openBtn.classList.add('personalizado');
-        openBtn.textContent = 'Editar personalización';
-      }
-      
-      // Cerrar popup
-      popup.style.display = 'none';
-      
-      // Ocultar cargando
-      ocultarCargando();
-      
-      // Mostrar notificación
-      mostrarNotificacion('¡Tu personalización está lista!');
-      
-      // Habilitar botón agregar al carrito
-      const addToCartBtn = document.querySelector('.single_add_to_cart_button');
-      if (addToCartBtn) {
-        addToCartBtn.disabled = false;
-        addToCartBtn.classList.remove('disabled');
-      }
-    })
-    .catch(error => {
-      console.error('Error al guardar:', error);
-      ocultarCargando();
-      
-      // Crear mensaje de error
-      const errorMsg = typeof error === 'string' ? error : 'Error al guardar. Por favor, intenta nuevamente.';
-      
-      // Mostrar error en la interfaz
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'error-message';
-      errorDiv.style.color = '#e74c3c';
-      errorDiv.style.backgroundColor = '#fdeaea';
-      errorDiv.style.padding = '15px';
-      errorDiv.style.borderRadius = '6px';
-      errorDiv.style.marginBottom = '15px';
-      errorDiv.style.textAlign = 'center';
-      errorDiv.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
-      
-      // Insertar en columna derecha
-      const rightCol = document.querySelector('.col-right');
-      if (rightCol) {
-        // Eliminar errores previos
-        const prevError = rightCol.querySelector('.error-message');
-        if (prevError) prevError.remove();
-        
-        // Insertar al inicio
-        rightCol.insertBefore(errorDiv, rightCol.firstChild);
-        
-        // Auto-eliminar después de 10 segundos
-        setTimeout(() => {
-          if (errorDiv.parentNode) {
-            errorDiv.remove();
-          }
-        }, 10000);
-      } else {
-        alert(errorMsg);
-      }
-    });
+  document.addEventListener('click', e => {
+    if (!e.target.matches('#confirmar-personalizacion')) return;
+    
+    // Verificar si hay imagen
+    if (!userImg) {
+        alert('Por favor, sube una imagen primero.');
+        return;
+    }
+    
+    // Si el botón está deshabilitado, mostrar mensaje
+    if (e.target.disabled || e.target.classList.contains('disabled')) {
+        alert('La imagen tiene baja resolución. Por favor, sube una imagen de mayor calidad.');
+        return;
+    }
+    
+    // Mostrar indicador de carga
+    mostrarCargando();
+    
+    // Guardar personalización
+    guardarPersonalizacion()
+        .then(data => {
+            console.log('Personalización guardada:', data);
+            
+            // Guardar en campos ocultos
+            if (inputHidden) {
+                inputHidden.value = data.image_url || data.image_data || '';
+            }
+            
+            if (personalizacionIdField && data.id) {
+                personalizacionIdField.value = data.id;
+            }
+            
+            // Actualizar botón personalizar
+            if (openBtn) {
+                openBtn.classList.add('personalizado');
+                openBtn.textContent = 'Editar personalización';
+            }
+            
+            // Cerrar popup
+            popup.style.display = 'none';
+            
+            // Ocultar cargando
+            ocultarCargando();
+            
+            // Mostrar notificación
+            mostrarNotificacion('¡Tu personalización está lista!');
+            
+            // Habilitar botón agregar al carrito
+            const addToCartBtn = document.querySelector('.single_add_to_cart_button');
+            if (addToCartBtn) {
+                addToCartBtn.disabled = false;
+                addToCartBtn.classList.remove('disabled');
+            }
+        })
+        .catch(error => {
+            console.error('Error al guardar:', error);
+            ocultarCargando();
+            
+            // Crear mensaje de error
+            const errorMsg = typeof error === 'string' ? error : 'Error al guardar. Por favor, intenta nuevamente.';
+            
+            // Mostrar error en la interfaz
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.style.color = '#e74c3c';
+            errorDiv.style.backgroundColor = '#fdeaea';
+            errorDiv.style.padding = '15px';
+            errorDiv.style.borderRadius = '6px';
+            errorDiv.style.marginBottom = '15px';
+            errorDiv.style.textAlign = 'center';
+            errorDiv.innerHTML = `<strong>Error:</strong> ${errorMsg}`;
+            
+            // Insertar en columna derecha
+            const rightCol = document.querySelector('.col-right');
+            if (rightCol) {
+                // Eliminar errores previos
+                const prevError = rightCol.querySelector('.error-message');
+                if (prevError) prevError.remove();
+                
+                // Insertar al inicio
+                rightCol.insertBefore(errorDiv, rightCol.firstChild);
+                
+                // Auto-eliminar después de 10 segundos
+                setTimeout(() => {
+                    if (errorDiv.parentNode) {
+                        errorDiv.remove();
+                    }
+                }, 10000);
+            } else {
+                alert(errorMsg);
+            }
+        });
 });
 
   function mostrarErrorEnCanvas(msg){
@@ -1180,6 +1233,40 @@ document.addEventListener('click', e => {
     colLeft.appendChild(err);
   }
   
+  window.resetPersonalizacion = function() {
+    return new Promise((resolve, reject) => {
+        if (!productId || !nonce) {
+            reject('Datos insuficientes para resetear');
+            return;
+        }
+        
+        jQuery.post(ajaxUrl, {
+            action: 'reset_personalization',
+            security: nonce,
+            product_id: productId
+        })
+        .done(res => {
+            if (res.success) {
+                // Limpiar campos
+                if (inputHidden) inputHidden.value = '';
+                if (personalizacionIdField) personalizacionIdField.value = '';
+                
+                // Limpiar variables
+                personalizacionId = 0;
+                userImg = null;
+                
+                // Notificar éxito
+                resolve(res.data);
+            } else {
+                reject(res.data || 'Error al resetear');
+            }
+        })
+        .fail(err => {
+            console.error('Error AJAX:', err);
+            reject(err);
+        });
+    });
+};
   /* ----------------------------- Cerrar modal ------------------------------ */
   if(closeBtn){ closeBtn.addEventListener('click',e=>{ e.preventDefault(); popup.style.display='none'; }); }
 

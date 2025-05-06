@@ -27,9 +27,12 @@ class CuadrosPersonalizables_Ajax_Handler {
     }
     
     /**
-     * Guardar personalización vía AJAX
-     */
-    /**
+ * Mejoras para class-ajax-handler.php
+ * Las siguientes modificaciones aseguran el guardado correcto de imágenes
+ * y la correcta devolución de URLs en lugar de datos base64
+ */
+
+/**
  * Guardar personalización vía AJAX
  */
 public function save_personalization() {
@@ -135,6 +138,87 @@ public function save_personalization() {
 }
 
 /**
+ * Cargar personalización vía AJAX
+ */
+public function load_personalization() {
+    // Verificar nonce
+    if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
+        wp_send_json_error('Error de seguridad.');
+    }
+    
+    $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+    $personalization_id = isset($_POST['id']) ? intval($_POST['id']) : 0;
+    
+    if (!$product_id && !$personalization_id) {
+        wp_send_json_error('ID de producto o personalización no válido.');
+    }
+    
+    // Cargar de la base de datos
+    if (!class_exists('CuadrosPersonalizables_DB')) {
+        wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
+    }
+    
+    $db = CuadrosPersonalizables_DB::get_instance();
+    
+    // Si se proporcionó un ID específico, usar ese
+    $personalization = null;
+    if ($personalization_id) {
+        $personalization = $db->get_personalization_by_id($personalization_id);
+    } else {
+        $personalization = $db->get_personalization($product_id);
+    }
+    
+    if ($personalization) {
+        // Añadir información de navegador actual para comparación/debugging
+        $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field($_SERVER['HTTP_USER_AGENT']) : '';
+        $screen_info = isset($_POST['screen_info']) ? sanitize_text_field($_POST['screen_info']) : '';
+        
+        // Decodificar el estado para añadir metadatos
+        $decoded_state = json_decode($personalization->image_state, true);
+        
+        // Si no se pudo decodificar, crear un objeto vacío
+        if (!$decoded_state) {
+            $decoded_state = array();
+        }
+        
+        // Añadir información de carga
+        if (!isset($decoded_state['meta'])) {
+            $decoded_state['meta'] = array();
+        }
+        
+        $decoded_state['meta']['loaded_at'] = current_time('mysql');
+        $decoded_state['meta']['load_user_agent'] = $user_agent;
+        $decoded_state['meta']['load_screen_info'] = $screen_info;
+        
+        // Reconvertir a JSON
+        $personalization->image_state = json_encode($decoded_state, JSON_PRETTY_PRINT);
+        
+        // Actualizar el registro para fines de seguimiento
+        $db->update_personalization_metadata($personalization->id, 
+                                           array('loaded_at' => current_time('mysql')));
+        
+        // MODIFICACIÓN: Priorizar image_url si existe
+        $image_data = '';
+        if (!empty($personalization->image_url)) {
+            // Si tenemos una URL, usarla
+            $image_data = $personalization->image_url;
+        } else if (!empty($personalization->image_data)) {
+            // Compatibilidad con versiones antiguas
+            $image_data = $personalization->image_data;
+        }
+        
+        wp_send_json_success(array(
+            'id' => $personalization->id,
+            'image_data' => $image_data,
+            'image_state' => $personalization->image_state,
+            'created_at' => $personalization->created_at,
+            'updated_at' => $personalization->updated_at
+        ));
+    } else {
+        wp_send_json_error('No se encontró ninguna personalización guardada para este producto.');
+    }
+}
+/**
  * Convierte y guarda una imagen base64 como archivo
  * 
  * @param string $base64_data La imagen en formato base64
@@ -186,82 +270,7 @@ private function save_image_to_file($base64_data, $product_id) {
     
     return $saved ? $file_url : false;
 }
-    
-    /**
-     * Cargar personalización vía AJAX
-     */
-    public function load_personalization() {
-        // Verificar nonce
-        if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
-            wp_send_json_error('Error de seguridad.');
-        }
-        
-        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
-        $personalization_id = isset($_POST['id']) ? intval($_POST['id']) : 0;
-        
-        if (!$product_id && !$personalization_id) {
-            wp_send_json_error('ID de producto o personalización no válido.');
-        }
-        
-        // Cargar de la base de datos
-        if (!class_exists('CuadrosPersonalizables_DB')) {
-            wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
-        }
-        
-        $db = CuadrosPersonalizables_DB::get_instance();
-        
-        // Si se proporcionó un ID específico, usar ese
-        $personalization = null;
-        if ($personalization_id) {
-            $personalization = $db->get_personalization_by_id($personalization_id);
-        } else {
-            $personalization = $db->get_personalization($product_id);
-        }
-        
-        if ($personalization) {
-            // Añadir información de navegador actual para comparación/debugging
-            $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field($_SERVER['HTTP_USER_AGENT']) : '';
-            $screen_info = isset($_POST['screen_info']) ? sanitize_text_field($_POST['screen_info']) : '';
-            
-            // Decodificar el estado para añadir metadatos
-            $decoded_state = json_decode($personalization->image_state, true);
-            
-            // Si no se pudo decodificar, crear un objeto vacío
-            if (!$decoded_state) {
-                $decoded_state = array();
-            }
-            
-            // Añadir información de carga
-            if (!isset($decoded_state['meta'])) {
-                $decoded_state['meta'] = array();
-            }
-            
-            $decoded_state['meta']['loaded_at'] = current_time('mysql');
-            $decoded_state['meta']['load_user_agent'] = $user_agent;
-            $decoded_state['meta']['load_screen_info'] = $screen_info;
-            
-            // Reconvertir a JSON
-            $personalization->image_state = json_encode($decoded_state, JSON_PRETTY_PRINT);
-            
-            // Actualizar el registro para fines de seguimiento
-            $db->update_personalization_metadata($personalization->id, 
-                                                array('loaded_at' => current_time('mysql')));
-            
-            wp_send_json_success(array(
-                'id' => $personalization->id,
-                'image_data' => $personalization->image_data,
-                'image_state' => $personalization->image_state,
-                'created_at' => $personalization->created_at,
-                'updated_at' => $personalization->updated_at
-            ));
-        } else {
-            wp_send_json_error('No se encontró ninguna personalización guardada para este producto.');
-        }
-    }
-    
-    /**
-     * Resetear personalización vía AJAX
-     */
+
     public function reset_personalization() {
         // Verificar nonce
         if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
