@@ -50,10 +50,20 @@ public function save_personalization() {
         return;
     }
     
-    if (empty($image_data) || strpos($image_data, 'data:image') !== 0) {
-        wp_send_json_error('Error: Datos de imagen inválidos');
-        return;
-    }
+    // Dentro de la función save_personalization, justo antes de guardar en la base de datos
+// Asegurarse de que image_data sea una cadena base64 válida
+if (empty($image_data) || strpos($image_data, 'data:image') !== 0) {
+    wp_send_json_error('Error: Datos de imagen inválidos o con formato incorrecto');
+    return;
+}
+
+// Verificar que la cadena base64 no esté corrupta
+$base64_data = substr($image_data, strpos($image_data, ',') + 1);
+$decoded = base64_decode($base64_data, true);
+if ($decoded === false) {
+    wp_send_json_error('Error: La imagen está corrupta. Por favor, inténtalo nuevamente.');
+    return;
+}
     
     if (empty($image_state)) {
         wp_send_json_error('Error: Estado de imagen vacío');

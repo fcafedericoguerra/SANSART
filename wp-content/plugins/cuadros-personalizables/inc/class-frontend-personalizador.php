@@ -454,7 +454,7 @@ public function agregar_datos_personalizados_al_carrito($cart_item_data, $produc
       return $cart_item_data; // No es un producto personalizable
   }
   
-  // Método nuevo: usar ID de personalización
+  // Método nuevo: usar ID de personalización (prioridad)
   if (!empty($_POST['personalizacion_id'])) {
       $personalizacion_id = intval($_POST['personalizacion_id']);
       
@@ -463,8 +463,19 @@ public function agregar_datos_personalizados_al_carrito($cart_item_data, $produc
           $personalizacion = $db->get_personalization_by_id($personalizacion_id);
           
           if ($personalizacion) {
+              // Guardar tanto el ID como la imagen
               $cart_item_data['personalizacion_id'] = $personalizacion_id;
-              $cart_item_data['img_personalizada'] = $personalizacion->image_data;
+              
+              // Verificar que la imagen es una cadena base64 válida
+              if (!empty($personalizacion->image_data) && 
+                  is_string($personalizacion->image_data) && 
+                  strpos($personalizacion->image_data, 'data:image') === 0) {
+                  $cart_item_data['img_personalizada'] = $personalizacion->image_data;
+              } else {
+                  // Crear un placeholder si no hay imagen válida
+                  $cart_item_data['img_personalizada'] = 'data:image/svg+xml;base64,' . base64_encode('<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" font-family="Arial" font-size="12" text-anchor="middle" dominant-baseline="middle" fill="#999">Imagen personalizada</text></svg>');
+              }
+              
               $cart_item_data['estado_personalizacion'] = $personalizacion->image_state;
               
               // Agregar hash único para evitar combinar items
@@ -476,8 +487,8 @@ public function agregar_datos_personalizados_al_carrito($cart_item_data, $produc
   }
   
   // Método antiguo: usar imagen directamente
-  if (!empty($_POST['img_personalizada'])) {
-      // Dato importante: NO usar sanitize_text_field para base64
+  if (!empty($_POST['img_personalizada']) && strpos($_POST['img_personalizada'], 'data:image') === 0) {
+      // Guardar imagen
       $cart_item_data['img_personalizada'] = $_POST['img_personalizada'];
       
       // Agregar hash único para evitar combinar items
@@ -534,12 +545,12 @@ public function mostrar_datos_en_carrito( $item_data, $cart_item ) {
     /* ---------- 3. Armar HTML seguro ---------- */
     ob_start();
     ?>
-    <div class="personalizacion-preview-container">
+    <div class="personalizacion-preview-container" style="margin:10px 0; text-align:center;">
         <?php if (!empty($imagen_base64)) : ?>
             <img src="<?php echo esc_attr($imagen_base64); ?>" 
                  class="cart-personalizado-preview" 
                  alt="<?php esc_attr_e('Diseño personalizado', 'cpc'); ?>" 
-                 style="max-width:100px; max-height:100px; display:block !important; margin:5px auto; border:1px solid #ddd;" />
+                 style="max-width:100px; max-height:100px; display:block !important; margin:5px auto; border:1px solid #ddd; border-radius:4px;" />
             <div class="personalizacion-actions" style="margin-top:8px; display:flex; justify-content:center; gap:5px;">
                 <a href="<?php echo esc_url($edit_url); ?>" 
                    class="button edit-personalizacion" 
@@ -550,7 +561,8 @@ public function mostrar_datos_en_carrito( $item_data, $cart_item ) {
         <?php else : ?>
             <p><?php _e('La imagen personalizada no está disponible.', 'cpc'); ?></p>
             <a href="<?php echo esc_url($edit_url); ?>" 
-               class="button button-primary edit-personalizacion">
+               class="button button-primary edit-personalizacion" 
+               style="font-size:12px !important; padding:5px 10px !important; line-height:1.5 !important;">
                 <?php _e('Editar diseño', 'cpc'); ?>
             </a>
         <?php endif; ?>
@@ -563,10 +575,47 @@ public function mostrar_datos_en_carrito( $item_data, $cart_item ) {
         'display' => wp_kses_post($html),
     );
 
-    /* ---------- 4. Encolar recursos sólo en carrito / checkout ---------- */
+    // Cargar CSS y JS necesarios
     if (is_cart() || is_checkout()) {
         wp_enqueue_style('cpc-css', CPC_URL . 'assets/css/personalizador.css', array(), CPC_VER);
         wp_enqueue_script('cpc-cart', CPC_URL . 'assets/js/cart-personalizacion.js', array('jquery'), CPC_VER, true);
+        
+        // Agregar script inline para corregir visualización de imágenes en carrito
+        wp_add_inline_script('cpc-cart', '
+            jQuery(document).ready(function($) {
+                // Función para corregir visualización de imágenes
+                function fixCartThumbnails() {
+                    $(".cart-personalizado-preview").each(function() {
+                        var $img = $(this);
+                        // Aplicar estilos forzados
+                        $img.css({
+                            "max-width": "100px",
+                            "max-height": "100px",
+                            "display": "block",
+                            "margin": "5px auto",
+                            "border": "1px solid #ddd",
+                            "border-radius": "4px"
+                        });
+                        
+                        // Cargar nuevamente la imagen si parece no mostrarse
+                        if ($img.is(":visible") && $img.height() < 5) {
+                            var src = $img.attr("src");
+                            if (src && src.indexOf("data:image") === 0) {
+                                $img.attr("src", src + "?" + new Date().getTime());
+                            }
+                        }
+                    });
+                }
+                
+                // Ejecutar al cargar
+                fixCartThumbnails();
+                
+                // Ejecutar nuevamente cuando se actualiza el carrito
+                $(document.body).on("updated_cart_totals", function() {
+                    setTimeout(fixCartThumbnails, 500);
+                });
+            });
+        ');
     }
 
     return $item_data;

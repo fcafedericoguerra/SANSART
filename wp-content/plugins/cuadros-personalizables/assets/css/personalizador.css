@@ -408,6 +408,26 @@
   margin: 0 auto;
 }
 
+/* Botón de reset zoom */
+.zoom-reset-btn {
+  margin-left: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background: #f7f7f7;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.zoom-reset-btn:hover {
+  background: #ebebeb;
+  transform: rotate(-45deg);
+}
 .personalizacion-lightbox-close {
   position: absolute;
   top: 10px;
