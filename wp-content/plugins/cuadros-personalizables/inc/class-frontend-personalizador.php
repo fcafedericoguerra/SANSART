@@ -453,6 +453,131 @@ public function validar_personalizacion($passed, $product_id) {
   return $passed;
 }
 
+/**
+ * Muestra la miniatura y los enlaces "Ver / Editar" de la personalización
+ * dentro de la tabla del carrito.
+ *
+ * @param array $item_data
+ * @param array $cart_item
+ * @return array
+ */
+public function mostrar_datos_en_carrito($item_data, $cart_item) {
+    // ¿Este ítem tiene personalización?
+    if (empty($cart_item['personalizacion_id']) && empty($cart_item['img_personalizada'])) {
+        return $item_data; // nada que hacer
+    }
+
+    $product_id = $cart_item['product_id'];
+    $personalizacion_id = isset($cart_item['personalizacion_id']) ? $cart_item['personalizacion_id'] : 0;
+
+    /* ---------- 1. Generar URL de edición ---------- */
+    $edit_url = add_query_arg(
+        array(
+            'edit_personalizacion' => '1',
+            'id' => $personalizacion_id,
+            'timestamp' => time(), // anti-caché
+        ),
+        get_permalink($product_id)
+    );
+
+    /* ---------- 2. Obtener la imagen (preferimos URL sobre base64) ---------- */
+    $image_src = '';
+    
+    // a) Desde el propio cart_item
+    if (!empty($cart_item['img_personalizada'])) {
+        $image_src = $cart_item['img_personalizada'];
+    }
+    
+    // b) Si no tenemos imagen pero tenemos ID, intentar obtenerla de la base de datos
+    if ((empty($image_src) || strpos($image_src, 'data:image') !== 0) && 
+        $personalizacion_id && class_exists('CuadrosPersonalizables_DB')) {
+        $db = CuadrosPersonalizables_DB::get_instance();
+        $row = $db->get_personalization_by_id($personalizacion_id);
+        
+        if ($row) {
+            if (!empty($row->image_url)) {
+                $image_src = $row->image_url;
+            } elseif (!empty($row->image_data)) {
+                $image_src = $row->image_data;
+            }
+        }
+    }
+
+    // c) Verificar si la imagen es válida
+    $image_valid = false;
+    if (!empty($image_src)) {
+        if (strpos($image_src, 'data:image') === 0) {
+            // Es una imagen base64, considerarla válida
+            $image_valid = true;
+        } elseif (strpos($image_src, 'http') === 0) {
+            // Es una URL, verificar si el archivo existe
+            $upload_dir = wp_upload_dir();
+            $upload_url = $upload_dir['baseurl'];
+            
+            // Si es una URL local del sitio, verificar que exista el archivo
+            if (strpos($image_src, $upload_url) === 0) {
+                $file_path = str_replace($upload_url, $upload_dir['basedir'], $image_src);
+                $image_valid = file_exists($file_path);
+                
+                // Si no existe, verificar la carpeta personalizados
+                if (!$image_valid) {
+                    // Intentar reparar la URL
+                    $personalizados_url = $upload_url . '/personalizados/';
+                    if (strpos($image_src, $personalizados_url) === 0) {
+                        // Obtener el nombre del archivo
+                        $filename = basename($image_src);
+                        // Verificar si existe en la carpeta personalizada
+                        $new_path = $upload_dir['basedir'] . '/personalizados/' . $filename;
+                        if (file_exists($new_path)) {
+                            $image_src = $personalizados_url . $filename;
+                            $image_valid = true;
+                        }
+                    }
+                }
+            } else {
+                // Es una URL externa, considerarla válida por ahora
+                $image_valid = true;
+            }
+        }
+    }
+
+    /* ---------- 3. Armar HTML seguro ---------- */
+    ob_start();
+    ?>
+    <div class="personalizacion-preview-container">
+        <?php if ($image_valid) : ?>
+            <img src="<?php echo esc_attr($image_src); ?>" 
+                 class="cart-personalizado-preview" 
+                 alt="<?php esc_attr_e('Diseño personalizado', 'cpc'); ?>" />
+            <div class="personalizacion-actions">
+                <a href="<?php echo esc_attr($image_src); ?>" 
+                   class="button view-personalizacion">
+                    <?php _e('Ver imagen', 'cpc'); ?>
+                </a>
+                <a href="<?php echo esc_url($edit_url); ?>" 
+                   class="button edit-personalizacion">
+                    <?php _e('Editar', 'cpc'); ?>
+                </a>
+            </div>
+        <?php else : ?>
+            <p><?php _e('La imagen personalizada no está disponible.', 'cpc'); ?></p>
+            <a href="<?php echo esc_url($edit_url); ?>" 
+               class="button button-primary edit-personalizacion">
+                <?php _e('Editar diseño', 'cpc'); ?>
+            </a>
+        <?php endif; ?>
+    </div>
+    <?php
+    $html = ob_get_clean();
+
+    $item_data[] = array(
+        'key' => __('Diseño Personalizado', 'cpc'),
+        'display' => wp_kses_post($html),
+    );
+
+    return $item_data;
+}
+
 public function agregar_datos_personalizados_al_carrito($cart_item_data, $product_id) {
     $mockup_url = get_post_meta($product_id, '_mockup_url', true);
     
@@ -501,94 +626,11 @@ public function agregar_datos_personalizados_al_carrito($cart_item_data, $produc
     return $cart_item_data;
   }
 
-/**
- * Muestra la miniatura y los enlaces “Ver / Editar” de la personalización
- * dentro de la tabla del carrito.
- *
- * @param array $item_data
- * @param array $cart_item
- * @return array
- */
-public function mostrar_datos_en_carrito($item_data, $cart_item) {
-    // ¿Este ítem tiene personalización?
-    if (empty($cart_item['personalizacion_id']) && empty($cart_item['img_personalizada'])) {
-        return $item_data; // nada que hacer
-    }
 
-    $product_id = $cart_item['product_id'];
-    $personalizacion_id = isset($cart_item['personalizacion_id']) ? $cart_item['personalizacion_id'] : 0;
 
-    /* ---------- 1. Generar URL de edición ---------- */
-    $edit_url = add_query_arg(
-        array(
-            'edit_personalizacion' => '1',
-            'id' => $personalizacion_id,
-            'timestamp' => time(), // anti-caché
-        ),
-        get_permalink($product_id)
-    );
 
-    /* ---------- 2. Obtener la imagen (preferimos URL sobre base64) ---------- */
-    $image_src = '';
-    
-    // a) Desde el propio cart_item
-    if (!empty($cart_item['img_personalizada'])) {
-        $image_src = $cart_item['img_personalizada'];
-    }
-    
-    // b) Si no tenemos imagen pero tenemos ID, intentar obtenerla de la base de datos
-    if (empty($image_src) && $personalizacion_id && class_exists('CuadrosPersonalizables_DB')) {
-        $db = CuadrosPersonalizables_DB::get_instance();
-        $row = $db->get_personalization_by_id($personalizacion_id);
-        
-        if ($row) {
-            if (!empty($row->image_url)) {
-                $image_src = $row->image_url;
-            } elseif (!empty($row->image_data)) {
-                $image_src = $row->image_data;
-            }
-        }
-    }
 
-    /* ---------- 3. Armar HTML seguro ---------- */
-    ob_start();
-    ?>
-    <div class="personalizacion-preview-container">
-        <?php if (!empty($image_src)) : ?>
-            <img src="<?php echo esc_attr($image_src); ?>" 
-                 class="cart-personalizado-preview" 
-                 alt="<?php esc_attr_e('Diseño personalizado', 'cpc'); ?>" />
-            <div class="personalizacion-actions">
-                <a href="#" 
-                   class="button view-personalizacion" 
-                   data-src="<?php echo esc_attr($image_src); ?>">
-                    <?php _e('Ver imagen', 'cpc'); ?>
-                </a>
-                <a href="<?php echo esc_url($edit_url); ?>" 
-                   class="button edit-personalizacion">
-                    <?php _e('Editar', 'cpc'); ?>
-                </a>
-            </div>
-        <?php else : ?>
-            <p><?php _e('La imagen personalizada no está disponible.', 'cpc'); ?></p>
-            <a href="<?php echo esc_url($edit_url); ?>" 
-               class="button button-primary edit-personalizacion">
-                <?php _e('Editar diseño', 'cpc'); ?>
-            </a>
-        <?php endif; ?>
-    </div>
-    <?php
-    $html = ob_get_clean();
-
-    $item_data[] = array(
-        'key' => __('Diseño Personalizado', 'cpc'),
-        'display' => wp_kses_post($html),
-    );
-
-    return $item_data;
-}
-
-public function personalizar_thumbnail_carrito($thumbnail, $cart_item, $cart_item_key) {
+  public function personalizar_thumbnail_carrito($thumbnail, $cart_item, $cart_item_key) {
   // Si el item tiene imagen personalizada, reemplazar miniatura
   if (isset($cart_item['img_personalizada'])) {
       return '<img src="' . esc_attr($cart_item['img_personalizada']) . '" class="cart-personalizado-preview" />';

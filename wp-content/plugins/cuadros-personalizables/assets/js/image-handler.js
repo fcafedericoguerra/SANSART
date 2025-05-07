@@ -3,7 +3,22 @@
  * Este script soluciona problemas de visualización en carrito y guardado de imágenes
  */
 jQuery(document).ready(function($) {
-    console.log("Inicializando manejador de imágenes mejorado...");
+    console.log("Inicializando manejador de imágenes mejorado v2...");
+    
+    // Función para verificar carpeta de personalizaciones
+    function verificarCarpetaPersonalizados() {
+        // Podemos usar AJAX para verificar la carpeta en el servidor
+        $.post(ajaxurl, {
+            action: 'verificar_carpeta_personalizados',
+            security: typeof personalizadorVars !== 'undefined' ? personalizadorVars.nonce : ''
+        }, function(response) {
+            if (response.success) {
+                console.log("Carpeta personalizados verificada:", response.data);
+            } else {
+                console.error("Error al verificar carpeta personalizados:", response.data);
+            }
+        });
+    }
     
     // Monitoreo global para detectar cuando se cargan las personalización
     const observer = new MutationObserver(function(mutations) {
@@ -33,15 +48,28 @@ jQuery(document).ready(function($) {
     function fixImage(imgElement) {
         // Si la imagen es base64, probablemente se muestre bien
         const src = imgElement.getAttribute('src');
+        if (!src) {
+            console.log("Imagen sin atributo src detectada, buscando URLs alternativas...");
+            // Intentar encontrar URL desde el botón Ver imagen cercano
+            const container = imgElement.closest('.personalizacion-preview-container');
+            if (container) {
+                const viewBtn = container.querySelector('.view-personalizacion');
+                if (viewBtn) {
+                    const viewSrc = viewBtn.getAttribute('href');
+                    if (viewSrc) {
+                        console.log("Recuperando URL desde botón Ver:", viewSrc);
+                        imgElement.setAttribute('src', viewSrc);
+                    }
+                }
+            }
+            return;
+        }
+        
+        // Si es base64, aplicar estilos directamente
         if (src && src.indexOf('data:image') === 0) {
             console.log("Imagen base64 detectada, verificando visualización");
             // Asegurar que los estilos se apliquen correctamente
-            imgElement.style.maxWidth = '100px';
-            imgElement.style.maxHeight = '100px';
-            imgElement.style.display = 'block';
-            imgElement.style.margin = '5px auto';
-            imgElement.style.border = '1px solid #ddd';
-            imgElement.style.borderRadius = '4px';
+            applyStyles(imgElement);
             return;
         }
         
@@ -52,61 +80,156 @@ jQuery(document).ready(function($) {
             const img = new Image();
             img.onload = function() {
                 console.log("Imagen cargada correctamente:", src);
+                // Asegurar que los estilos se apliquen correctamente
+                applyStyles(imgElement);
             };
             img.onerror = function() {
                 console.error("Error al cargar imagen URL:", src);
-                // Intentar recargar con un parámetro timestamp para evitar caché
-                imgElement.src = src + (src.includes('?') ? '&' : '?') + 'nocache=' + new Date().getTime();
+                handleImageError(imgElement, src);
             };
             img.src = src;
         }
     }
     
-    // Mejorar el manejo de personalización guardada
-    function setupPersonalizacionHandlers() {
-        // Solo proceder si estamos en una página de producto
-        if (!$('form.cart').length) return;
+    // Manejar error de carga de imagen
+    function handleImageError(imgElement, src) {
+        // 1. Intentar añadir parámetro anti-caché
+        const cacheBusterSrc = src + (src.includes('?') ? '&' : '?') + 'nocache=' + new Date().getTime();
+        console.log("Intentando con anti-caché:", cacheBusterSrc);
         
-        // Variables importantes
-        const btnPersonalizar = $('#btn-personalizar');
-        const imgPersonalizadaInput = $('#img_personalizada');
-        const personalizacionIdInput = $('#personalizacion_id');
+        const img = new Image();
+        img.onload = function() {
+            console.log("Imagen cargada con anti-caché:", cacheBusterSrc);
+            imgElement.src = cacheBusterSrc;
+            applyStyles(imgElement);
+        };
+        img.onerror = function() {
+            console.error("Sigue fallando, intentando convertir a ruta absoluta");
+            
+            // 2. Verificar si es una ruta relativa e intentar hacerla absoluta
+            if (src.indexOf('/') === 0 && src.indexOf('//') !== 0) {
+                const absPath = window.location.origin + src;
+                tryWithAbsolutePath(imgElement, absPath);
+            } else if (src.indexOf('http') !== 0) {
+                const absPath = window.location.origin + '/' + src;
+                tryWithAbsolutePath(imgElement, absPath);
+            } else {
+                // 3. Si todo falla, mostrar imagen de error
+                fallbackToErrorImage(imgElement);
+            }
+        };
+        img.src = cacheBusterSrc;
+    }
+    
+    // Intentar con ruta absoluta
+    function tryWithAbsolutePath(imgElement, absPath) {
+        const img = new Image();
+        img.onload = function() {
+            console.log("Imagen cargada con ruta absoluta:", absPath);
+            imgElement.src = absPath;
+            applyStyles(imgElement);
+        };
+        img.onerror = function() {
+            console.error("Ruta absoluta también falló:", absPath);
+            fallbackToErrorImage(imgElement);
+        };
+        img.src = absPath;
+    }
+    
+    // Última opción: imagen de error
+    function fallbackToErrorImage(imgElement) {
+        // Crear una imagen SVG básica como fallback
+        const svgFallback = `data:image/svg+xml,${encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+                <rect width="100%" height="100%" fill="#f8f8f8"/>
+                <text x="50%" y="50%" font-family="Arial" font-size="12" fill="#999" text-anchor="middle">Imagen no disponible</text>
+            </svg>
+        `)}`;
         
-        // Si el usuario tiene una personalización guardada, cambiar el texto del botón
-        if ((imgPersonalizadaInput.length && imgPersonalizadaInput.val()) || 
-            (personalizacionIdInput.length && personalizacionIdInput.val())) {
-            btnPersonalizar.addClass('personalizado');
-            btnPersonalizar.text('Editar personalización');
+        imgElement.src = svgFallback;
+        imgElement.setAttribute('alt', 'Imagen no disponible');
+        
+        // Marcar para edición
+        const container = imgElement.closest('.personalizacion-preview-container');
+        if (container) {
+            const viewBtn = container.querySelector('.view-personalizacion');
+            if (viewBtn) {
+                viewBtn.style.display = 'none'; // Ocultar botón Ver
+            }
+            
+            // Agregar mensaje de error
+            const errorMsg = document.createElement('p');
+            errorMsg.style.color = '#e74c3c';
+            errorMsg.style.fontSize = '12px';
+            errorMsg.textContent = 'Error al cargar la imagen. Por favor, edita la personalización.';
+            
+            // Insertar antes de los botones
+            const actionsDiv = container.querySelector('.personalizacion-actions');
+            if (actionsDiv) {
+                container.insertBefore(errorMsg, actionsDiv);
+            } else {
+                container.appendChild(errorMsg);
+            }
         }
     }
     
-    // Agregar lightbox para ver imagen en carrito
-    function setupLightbox() {
-        // Ver si tenemos imágenes personalizadas en el carrito
-        const personalizaciones = $('.cart-personalizado-preview');
-        if (!personalizaciones.length) return;
-        
-        // Por cada contenedor de personalización, agregar botón "Ver imagen"
-        $('.personalizacion-actions').each(function() {
-            // Verificar si ya existe el botón
-            if ($(this).find('.view-personalizacion').length > 0) return;
+    // Aplicar estilos a la imagen
+    function applyStyles(imgElement) {
+        imgElement.style.maxWidth = '100px';
+        imgElement.style.maxHeight = '100px';
+        imgElement.style.display = 'block';
+        imgElement.style.margin = '5px auto';
+        imgElement.style.border = '1px solid #ddd';
+        imgElement.style.borderRadius = '4px';
+        imgElement.style.objectFit = 'contain';
+        imgElement.style.backgroundColor = '#f9f9f9';
+    }
+    
+    // Corregir problema de los botones "Ver imagen"
+    function fixViewButtons() {
+        $('.view-personalizacion').each(function() {
+            const $this = $(this);
+            const href = $this.attr('href');
             
-            // Encontrar la imagen en el contenedor padre
-            const container = $(this).closest('.personalizacion-preview-container');
-            const img = container.find('.cart-personalizado-preview');
-            if (!img.length) return;
+            if (!href || href === '#') {
+                // Buscar imagen cercana para obtener src
+                const container = $this.closest('.personalizacion-preview-container');
+                if (container) {
+                    const img = container.querySelector('.cart-personalizado-preview');
+                    if (img && img.src) {
+                        $this.attr('href', img.src);
+                    } else {
+                        // Si no hay imagen, ocultar el botón
+                        $this.hide();
+                    }
+                }
+            }
             
-            // Crear botón "Ver imagen"
-            const viewBtn = $('<a href="#" class="button view-personalizacion">Ver imagen</a>');
-            
-            // Insertar antes del botón editar
-            $(this).prepend(viewBtn);
-            
-            // Configurar evento de clic
-            viewBtn.on('click', function(e) {
+            // Asegurar que tenga evento click correcto
+            $this.off('click').on('click', function(e) {
                 e.preventDefault();
-                showImageLightbox(img.attr('src'));
+                const imgSrc = $(this).attr('href');
+                if (imgSrc && imgSrc !== '#') {
+                    showImageLightbox(imgSrc);
+                } else {
+                    alert('No se puede mostrar la imagen. Por favor, edita la personalización.');
+                }
             });
+        });
+    }
+    
+    // Corregir problema del botón "editar" que reinicia la edición
+    function fixEditButton() {
+        $('.edit-personalizacion').each(function() {
+            const $this = $(this);
+            const href = $this.attr('href');
+            
+            // Solo modificar si no ha sido modificado ya
+            if (href && !href.includes('keep_personalization=1')) {
+                // Añadir parámetro para mantener la personalización
+                const newHref = href + (href.includes('?') ? '&' : '?') + 'keep_personalization=1';
+                $this.attr('href', newHref);
+            }
         });
     }
     
@@ -118,6 +241,7 @@ jQuery(document).ready(function($) {
         // Verificar URL de la imagen
         if (!imageUrl) {
             console.error("URL de imagen inválida para lightbox");
+            alert('No se puede mostrar la imagen. Por favor, edita la personalización.');
             return;
         }
         
@@ -197,33 +321,21 @@ jQuery(document).ready(function($) {
         setTimeout(() => lightbox.classList.add('active'), 10);
     }
     
-    // Corregir problema del botón "editar" que reinicia la edición
-    function fixEditButton() {
-        $('.edit-personalizacion').each(function() {
-            const $this = $(this);
-            const href = $this.attr('href');
-            
-            // Solo modificar si no ha sido modificado ya
-            if (href && !href.includes('keep_personalization=1')) {
-                // Añadir parámetro para mantener la personalización
-                const newHref = href + (href.includes('?') ? '&' : '?') + 'keep_personalization=1';
-                $this.attr('href', newHref);
-            }
-        });
-    }
+    // Ejecutar funciones de inicialización
+    verificarCarpetaPersonalizados();
+    fixViewButtons();
+    fixEditButton();
     
-    // Ejecutar funciones cuando la página se carga
-    $(document).ready(function() {
-        setupPersonalizacionHandlers();
-        setupLightbox();
-        fixEditButton();
+    // Buscar todas las imágenes en el carrito y optimizarlas
+    $('.cart-personalizado-preview').each(function() {
+        fixImage(this);
     });
     
     // También cuando se actualiza el carrito
     $(document.body).on('updated_cart_totals', function() {
         console.log("Carrito actualizado, aplicando mejoras...");
         setTimeout(function() {
-            setupLightbox();
+            fixViewButtons();
             fixEditButton();
             
             // Buscar todas las imágenes en el carrito y mejorarlas
@@ -231,11 +343,5 @@ jQuery(document).ready(function($) {
                 fixImage(this);
             });
         }, 500);
-    });
-    
-    // Personalizador actualizado
-    $(document).on('personalizacion_actualizada', function() {
-        console.log("Personalización actualizada, aplicando mejoras...");
-        setupPersonalizacionHandlers();
     });
 });

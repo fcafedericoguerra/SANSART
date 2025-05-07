@@ -36,6 +36,169 @@ require_once CPC_PLUGIN_DIR . 'inc/class-personalizador.php';
 require_once CPC_PLUGIN_DIR . 'inc/class-diagnostico.php';
 
 /**
+ * Verifica y crea la carpeta de personalizados
+ * 
+ * @return array Estado de la carpeta y posibles errores
+ */
+function cpc_verificar_carpeta_personalizados() {
+    $upload_dir = wp_upload_dir();
+    $personalizados_path = $upload_dir['basedir'] . '/personalizados/';
+    $personalizados_url = $upload_dir['baseurl'] . '/personalizados/';
+    
+    $resultado = array(
+        'existe' => false,
+        'permisos' => false,
+        'index' => false,
+        'error' => '',
+        'path' => $personalizados_path,
+        'url' => $personalizados_url
+    );
+    
+    // Verificar si existe
+    if (!file_exists($personalizados_path)) {
+        // Intentar crear la carpeta
+        $created = wp_mkdir_p($personalizados_path);
+        if (!$created) {
+            $resultado['error'] = 'No se pudo crear la carpeta de personalizados.';
+            return $resultado;
+        }
+    }
+    
+    $resultado['existe'] = true;
+    
+    // Verificar permisos
+    if (!is_writable($personalizados_path)) {
+        // Intentar establecer permisos
+        chmod($personalizados_path, 0755);
+        if (!is_writable($personalizados_path)) {
+            $resultado['error'] = 'La carpeta no tiene permisos de escritura.';
+            return $resultado;
+        }
+    }
+    
+    $resultado['permisos'] = true;
+    
+    // Verificar index.php
+    if (!file_exists($personalizados_path . 'index.php')) {
+        // Crear archivo index.php
+        $index_content = '<?php // Silence is golden';
+        $index_created = file_put_contents($personalizados_path . 'index.php', $index_content);
+        if (!$index_created) {
+            $resultado['error'] = 'No se pudo crear el archivo index.php';
+            return $resultado;
+        }
+    }
+    
+    $resultado['index'] = true;
+    
+    return $resultado;
+}
+
+/**
+ * Acción AJAX para verificar la carpeta de personalizados
+ */
+function cpc_ajax_verificar_carpeta_personalizados() {
+    // Verificar nonce
+    if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
+        wp_send_json_error('Error de seguridad');
+    }
+    
+    // Verificar y crear carpeta
+    $resultado = cpc_verificar_carpeta_personalizados();
+    
+    if (!empty($resultado['error'])) {
+        wp_send_json_error($resultado);
+    } else {
+        wp_send_json_success($resultado);
+    }
+}
+add_action('wp_ajax_verificar_carpeta_personalizados', 'cpc_ajax_verificar_carpeta_personalizados');
+add_action('wp_ajax_nopriv_verificar_carpeta_personalizados', 'cpc_ajax_verificar_carpeta_personalizados');
+
+/**
+ * Verifica la carpeta de personalizados durante la activación del plugin y la inicialización
+ */
+function cpc_verificar_carpeta_personalizados_init() {
+    // Verificar carpeta al iniciar
+    cpc_verificar_carpeta_personalizados();
+}
+add_action('init', 'cpc_verificar_carpeta_personalizados_init');
+
+/**
+ * Intenta reparar URLs de imágenes que podrían estar mal formadas
+ * 
+ * @param string $image_url URL de la imagen a verificar
+ * @return string URL corregida o la original si no se pudo corregir
+ */
+function cpc_corregir_url_imagen($image_url) {
+    if (empty($image_url)) {
+        return $image_url;
+    }
+    
+    // Si es base64, devolver tal cual
+    if (strpos($image_url, 'data:image') === 0) {
+        return $image_url;
+    }
+    
+    // Comprobar si es una URL relativa
+    if (strpos($image_url, 'http') !== 0 && strpos($image_url, '//') !== 0) {
+        $upload_dir = wp_upload_dir();
+        
+        // Si comienza con slash, es una ruta absoluta desde la raíz del sitio
+        if (strpos($image_url, '/') === 0) {
+            return site_url($image_url);
+        }
+        
+        // Si no, asumimos que es relativa a uploads
+        return $upload_dir['baseurl'] . '/' . ltrim($image_url, '/');
+    }
+    
+    return $image_url;
+}
+
+/**
+ * Añade diagnóstico de carpeta personalizada al sistema de diagnóstico
+ * 
+ * @param array $diagnostico Diagnóstico actual
+ * @return array Diagnóstico actualizado
+ */
+function cpc_anadir_diagnostico_carpeta($diagnostico) {
+    $resultado = cpc_verificar_carpeta_personalizados();
+    
+    $diagnostico['carpeta_personalizados'] = $resultado;
+    
+    if (!$resultado['existe'] || !$resultado['permisos'] || !$resultado['index']) {
+        $diagnostico['errores'][] = "Problema con la carpeta personalizados: " . (!empty($resultado['error']) ? $resultado['error'] : "Verificar ruta y permisos.");
+    }
+    
+    return $diagnostico;
+}
+add_filter('cpc_diagnostico_verificar_estructura', 'cpc_anadir_diagnostico_carpeta');
+
+/**
+ * Verifica si la carpeta personalizados existe al activar el plugin
+ */
+function cpc_verificar_carpeta_al_activar() {
+    // Verificar carpeta
+    $resultado = cpc_verificar_carpeta_personalizados();
+    
+    // Si hay error, mostrar notificación
+    if (!empty($resultado['error'])) {
+        update_option('cpc_error_carpeta_personalizados', $resultado['error']);
+        update_option('cpc_necesita_diagnostico', true);
+    }
+}
+add_action('activated_plugin', 'cpc_verificar_carpeta_al_activar');
+
+/**
+ * Repara la carpeta /personalizados/ cuando se repara el plugin
+ */
+function cpc_reparar_carpeta_personalizados() {
+    cpc_verificar_carpeta_personalizados();
+}
+add_action('cpc_reparar_plugin', 'cpc_reparar_carpeta_personalizados');
+
+/**
  * Inicializar el plugin
  */
 function cpc_iniciar_plugin() {
@@ -59,6 +222,9 @@ function cpc_iniciar_plugin() {
     
     // Comprobar si hay actualizaciones de base de datos
     cpc_verificar_actualizaciones();
+    
+    // Verificar carpeta de personalizados
+    cpc_verificar_carpeta_personalizados();
 }
 add_action('plugins_loaded', 'cpc_iniciar_plugin');
 
@@ -155,6 +321,9 @@ function cpc_activar_plugin() {
     
     // Limpiar cualquier transient o caché
     delete_transient('cpc_cache_mockups');
+    
+    // Verificar carpeta de personalizados
+    cpc_verificar_carpeta_personalizados();
 }
 register_activation_hook(__FILE__, 'cpc_activar_plugin');
 
@@ -206,6 +375,24 @@ function cpc_mostrar_aviso_diagnostico() {
             </p>
         </div>
         <?php
+    }
+    
+    // Mostrar aviso específico de carpeta si hay error
+    $error_carpeta = get_option('cpc_error_carpeta_personalizados', '');
+    if (!empty($error_carpeta) && current_user_can('manage_options')) {
+        ?>
+        <div class="notice notice-error is-dismissible">
+            <p>
+                <?php _e('Cuadros Personalizables: ', 'cuadros-personalizables'); ?> 
+                <?php echo esc_html($error_carpeta); ?>
+                <a href="<?php echo admin_url('edit.php?post_type=product&page=cpc-diagnostico'); ?>">
+                    <?php _e('Ejecutar diagnóstico para intentar reparar', 'cuadros-personalizables'); ?>
+                </a>
+            </p>
+        </div>
+        <?php
+        // Limpiar aviso después de mostrarlo
+        delete_option('cpc_error_carpeta_personalizados');
     }
 }
 add_action('admin_notices', 'cpc_mostrar_aviso_diagnostico');
@@ -304,6 +491,11 @@ function cpc_debug_info() {
         $mockup_url = get_post_meta($product->get_id(), '_mockup_url', true);
         
         if (!empty($mockup_url)) {
+            // Preparar datos para JavaScript
+            $upload_dir = wp_upload_dir();
+            $personalizados_path = $upload_dir['basedir'] . '/personalizados/';
+            $personalizados_exists = file_exists($personalizados_path) ? 'existe' : 'no existe';
+            
             ?>
             <script>
             console.log('=== DEBUG CUADROS PERSONALIZABLES ===');
@@ -341,6 +533,9 @@ function cpc_debug_info() {
                     console.log('Canvas no encontrado en el DOM');
                 }
             });
+            
+            // Verificar carpeta de personalizados
+            console.log('Carpeta de personalizados:', '<?php echo esc_js($personalizados_path); ?> (<?php echo esc_js($personalizados_exists); ?>)');
             
             console.log('=== FIN DEBUG ===');
             </script>
