@@ -129,6 +129,15 @@ public function cargar_script_carrito() {
             defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time(),
             true
         );
+        
+        // Agregar script mejorado para manejo de imágenes
+        wp_enqueue_script(
+            'image-handler-js',
+            plugin_dir_url(dirname(__FILE__)) . 'assets/js/image-handler.js',
+            array('jquery', 'cart-personalizacion-js'),
+            defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time(),
+            true
+        );
     }
 }
 
@@ -500,39 +509,44 @@ public function agregar_datos_personalizados_al_carrito($cart_item_data, $produc
  * @param array $cart_item
  * @return array
  */
-public function mostrar_datos_en_carrito( $item_data, $cart_item ) {
-
+public function mostrar_datos_en_carrito($item_data, $cart_item) {
     // ¿Este ítem tiene personalización?
-    if ( empty( $cart_item['personalizacion_id'] ) && empty( $cart_item['img_personalizada'] ) ) {
+    if (empty($cart_item['personalizacion_id']) && empty($cart_item['img_personalizada'])) {
         return $item_data; // nada que hacer
     }
 
-    $product_id         = $cart_item['product_id'];
-    $personalizacion_id = isset( $cart_item['personalizacion_id'] ) ? $cart_item['personalizacion_id'] : 0;
+    $product_id = $cart_item['product_id'];
+    $personalizacion_id = isset($cart_item['personalizacion_id']) ? $cart_item['personalizacion_id'] : 0;
 
     /* ---------- 1. Generar URL de edición ---------- */
     $edit_url = add_query_arg(
         array(
             'edit_personalizacion' => '1',
-            'id'        => $personalizacion_id,
-            'timestamp' => time(),             // anti-caché
+            'id' => $personalizacion_id,
+            'timestamp' => time(), // anti-caché
         ),
-        get_permalink( $product_id )
+        get_permalink($product_id)
     );
 
-    /* ---------- 2. Conseguir la imagen base64 ---------- */
-    $imagen_base64 = '';   // fallback vacío
-
+    /* ---------- 2. Obtener la imagen (preferimos URL sobre base64) ---------- */
+    $image_src = '';
+    
     // a) Desde el propio cart_item
-    if ( ! empty( $cart_item['img_personalizada'] ) && strpos( $cart_item['img_personalizada'], 'data:image' ) === 0 ) {
-        $imagen_base64 = $cart_item['img_personalizada'];
-
-    // b) Desde la BD (por ID)
-    } elseif ( $personalizacion_id && class_exists( 'CuadrosPersonalizables_DB' ) ) {
+    if (!empty($cart_item['img_personalizada'])) {
+        $image_src = $cart_item['img_personalizada'];
+    }
+    
+    // b) Si no tenemos imagen pero tenemos ID, intentar obtenerla de la base de datos
+    if (empty($image_src) && $personalizacion_id && class_exists('CuadrosPersonalizables_DB')) {
         $db = CuadrosPersonalizables_DB::get_instance();
-        $row = $db->get_personalization_by_id( $personalizacion_id );
-        if ( $row && ! empty( $row->image_data ) && strpos( $row->image_data, 'data:image' ) === 0 ) {
-            $imagen_base64 = $row->image_data;
+        $row = $db->get_personalization_by_id($personalizacion_id);
+        
+        if ($row) {
+            if (!empty($row->image_url)) {
+                $image_src = $row->image_url;
+            } elseif (!empty($row->image_data)) {
+                $image_src = $row->image_data;
+            }
         }
     }
 
@@ -570,12 +584,6 @@ public function mostrar_datos_en_carrito( $item_data, $cart_item ) {
         'key' => __('Diseño Personalizado', 'cpc'),
         'display' => wp_kses_post($html),
     );
-
-    // Asegurarnos de cargar los scripts y estilos necesarios
-    if (is_cart() || is_checkout()) {
-        wp_enqueue_style('personalizador-css', plugin_dir_url(dirname(__FILE__)) . 'assets/css/personalizador.css');
-        wp_enqueue_script('cart-personalizacion-js', plugin_dir_url(dirname(__FILE__)) . 'assets/js/cart-personalizacion.js', array('jquery'), null, true);
-    }
 
     return $item_data;
 }
