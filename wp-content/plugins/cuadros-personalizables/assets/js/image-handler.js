@@ -76,21 +76,43 @@ jQuery(document).ready(function($) {
         // Si es una URL y no se carga correctamente, intentar cargarla de nuevo
         if (src && src.indexOf('http') === 0) {
             console.log("Imagen URL detectada:", src);
-            // Verificar si la imagen es válida
-            const img = new Image();
-            img.onload = function() {
-                console.log("Imagen cargada correctamente:", src);
-                // Asegurar que los estilos se apliquen correctamente
-                applyStyles(imgElement);
-            };
-            img.onerror = function() {
-                console.error("Error al cargar imagen URL:", src);
-                handleImageError(imgElement, src);
-            };
-            img.src = src;
+            
+            // Intentar con Base64
+            buscarBase64ParaImagen(imgElement, src);
         }
     }
     
+    // Función para buscar una versión base64 de la imagen
+function buscarBase64ParaImagen(imgElement, originalSrc) {
+    // Intentar obtener ID desde la URL
+    const matches = originalSrc.match(/personalizado_(\d+)/);
+    if (!matches || !matches[1]) {
+        fallbackToErrorImage(imgElement);
+        return;
+    }
+    
+    const id = matches[1];
+    console.log("Intentando recuperar base64 para personalización ID:", id);
+    
+    // Hacer solicitud AJAX para obtener datos base64 directamente
+    $.post(ajaxurl || '/wp-admin/admin-ajax.php', {
+        action: 'get_personalizacion_base64',
+        id: id,
+        security: typeof personalizadorVars !== 'undefined' ? personalizadorVars.nonce : ''
+    }, function(response) {
+        if (response.success && response.data) {
+            console.log("Base64 recuperado correctamente");
+            imgElement.src = response.data;
+            applyStyles(imgElement);
+        } else {
+            console.error("No se pudo recuperar base64:", response);
+            fallbackToErrorImage(imgElement);
+        }
+    }).fail(function() {
+        console.error("Error en la solicitud AJAX");
+        fallbackToErrorImage(imgElement);
+    });
+}
     // Manejar error de carga de imagen
     function handleImageError(imgElement, src) {
         // 1. Intentar añadir parámetro anti-caché

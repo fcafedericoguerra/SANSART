@@ -19,14 +19,16 @@ class CuadrosPersonalizables_Ajax_Handler {
         add_action('wp_ajax_save_personalization', array($this, 'save_personalization'));
         add_action('wp_ajax_load_personalization', array($this, 'load_personalization'));
         add_action('wp_ajax_reset_personalization', array($this, 'reset_personalization'));
+        add_action('wp_ajax_get_personalizacion_base64', array($this, 'get_personalizacion_base64'));
         
         // Endpoints para usuarios no logueados
         add_action('wp_ajax_nopriv_save_personalization', array($this, 'save_personalization'));
         add_action('wp_ajax_nopriv_load_personalization', array($this, 'load_personalization'));
         add_action('wp_ajax_nopriv_reset_personalization', array($this, 'reset_personalization'));
+        add_action('wp_ajax_nopriv_get_personalizacion_base64', array($this, 'get_personalizacion_base64'));
     }
     
-    /**
+/**
  * Mejoras para class-ajax-handler.php
  * Las siguientes modificaciones aseguran el guardado correcto de imágenes
  * y la correcta devolución de URLs en lugar de datos base64
@@ -271,6 +273,54 @@ private function save_image_to_file($base64_data, $product_id) {
     return $saved ? $file_url : false;
 }
 
+/**
+ * Obtener datos base64 de una personalización
+ */
+public function get_personalizacion_base64() {
+    // Verificar nonce
+    if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
+        wp_send_json_error('Error de seguridad.');
+    }
+    
+    $id = isset($_POST['id']) ? intval($_POST['id']) : 0;
+    
+    if (!$id) {
+        wp_send_json_error('ID no válido.');
+    }
+    
+    // Obtener datos de la base de datos
+    if (!class_exists('CuadrosPersonalizables_DB')) {
+        wp_send_json_error('Módulo de base de datos no disponible.');
+    }
+    
+    $db = CuadrosPersonalizables_DB::get_instance();
+    $personalizacion = $db->get_personalization_by_id($id);
+    
+    if (!$personalizacion) {
+        wp_send_json_error('No se encontró la personalización.');
+    }
+    
+    // Priorizar base64 (image_data) sobre URL
+    $image_data = '';
+    if (!empty($personalizacion->image_data)) {
+        $image_data = $personalizacion->image_data;
+    } elseif (!empty($personalizacion->image_url)) {
+        // Intentar cargar la imagen y convertirla a base64
+        $upload_dir = wp_upload_dir();
+        $file_path = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $personalizacion->image_url);
+        
+        if (file_exists($file_path)) {
+            $image_data = 'data:image/png;base64,' . base64_encode(file_get_contents($file_path));
+        }
+    }
+    
+    if (empty($image_data)) {
+        wp_send_json_error('No hay datos de imagen disponibles.');
+    }
+    
+    wp_send_json_success($image_data);
+}
+
     public function reset_personalization() {
         // Verificar nonce
         if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
@@ -305,4 +355,4 @@ private function save_image_to_file($base64_data, $product_id) {
             wp_send_json_error('No se encontró ninguna personalización para eliminar.');
         }
     }
-} 
+}
