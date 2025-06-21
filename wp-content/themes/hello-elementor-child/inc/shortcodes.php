@@ -186,3 +186,66 @@ function shortcode_listado_artistas($atts, $content = null) {
     return ob_get_clean();
 }
 add_shortcode('listado_artistas', 'shortcode_listado_artistas');
+
+function sansart_tarjeta_cuadro_artista() {
+    $artista_id = get_the_ID();
+    $artista_nombre = get_the_title();
+
+    $cuadro = new WP_Query(array(
+        'post_type' => 'product',
+        'posts_per_page' => 1,
+        'meta_query' => array(
+            array(
+                'key' => 'artista_relacionado',
+                'value' => '"' . $artista_id . '"',
+                'compare' => 'LIKE'
+            )
+        )
+    ));
+
+    ob_start();
+
+    if ($cuadro->have_posts()) :
+        while ($cuadro->have_posts()) : $cuadro->the_post();
+            $permalink = get_permalink();
+            $thumbnail = get_the_post_thumbnail(null, 'medium');
+            ?>
+            <div class="artista-tarjeta">
+                <div class="elementor-widget-featured-image elementor-widget-image">
+                    <a href="<?php echo esc_url($permalink); ?>">
+                        <?php echo $thumbnail; ?>
+                    </a>
+                </div>
+                <div class="artista-overlay">
+                    <h3 id="artista-nombre"><?php echo esc_html($artista_nombre); ?></h3>
+                    <div class="boton-artista">
+                        <a class="elementor-button" href="<?php echo esc_url($permalink); ?>">
+                            Ver cuadro
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <?php
+        endwhile;
+        wp_reset_postdata();
+    else :
+        ?>
+        <div class="artista-tarjeta">
+            <div class="elementor-widget-featured-image elementor-widget-image">
+                <img src="<?php echo get_stylesheet_directory_uri(); ?>/assets/img/placeholder.jpg" alt="Sin imagen">
+            </div>
+            <div class="artista-overlay">
+                <h3 id="artista-nombre"><?php echo esc_html($artista_nombre); ?></h3>
+                <div class="boton-artista">
+                    <a class="elementor-button" href="#">
+                        Ver cuadro
+                    </a>
+                </div>
+            </div>
+        </div>
+        <?php
+    endif;
+
+    return ob_get_clean();
+}
+add_shortcode('tarjeta_cuadro_artista', 'sansart_tarjeta_cuadro_artista');

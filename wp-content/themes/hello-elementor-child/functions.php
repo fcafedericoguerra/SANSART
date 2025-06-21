@@ -184,5 +184,29 @@ function ajax_filtrar_productos() {
 
     wp_die();
 }
+
 add_action('wp_ajax_filtrar_productos', 'ajax_filtrar_productos');
 add_action('wp_ajax_nopriv_filtrar_productos', 'ajax_filtrar_productos');
+
+// 6) Encolar script JS global
+function hec_enqueue_global_scripts() {
+    wp_enqueue_script(
+        'hec-global',
+        get_stylesheet_directory_uri() . '/assets/js/global.js',
+        array('jquery'),
+        '1.0.0',
+        true
+    );
+}
+add_action('wp_enqueue_scripts', 'hec_enqueue_global_scripts', 20);
+
+// 7) Encolar estilos globales del tema hijo
+function hec_enqueue_styles() {
+    wp_enqueue_style(
+        'hello-elementor-child-style',
+        get_stylesheet_directory_uri() . '/style.css',
+        array(),
+        '1.0.0'
+    );
+}
+add_action('wp_enqueue_scripts', 'hec_enqueue_styles', 5);
