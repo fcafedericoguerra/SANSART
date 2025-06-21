@@ -140,84 +140,87 @@ public function save_personalization() {
 }
 
 /**
- * Cargar personalización vía AJAX
+/**
+ * Cargar personalización vía AJAX con mejor manejo de errores
  */
 public function load_personalization() {
     // Verificar nonce
     if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'personalizador_nonce')) {
-        wp_send_json_error('Error de seguridad.');
+        wp_send_json_error('Error de seguridad. Recarga la página.');
+        return;
     }
     
+    // Obtener parámetros
     $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
     $personalization_id = isset($_POST['id']) ? intval($_POST['id']) : 0;
     
     if (!$product_id && !$personalization_id) {
         wp_send_json_error('ID de producto o personalización no válido.');
+        return;
     }
     
-    // Cargar de la base de datos
-    if (!class_exists('CuadrosPersonalizables_DB')) {
-        wp_send_json_error('Error del sistema: Módulo de base de datos no disponible.');
-    }
-    
-    $db = CuadrosPersonalizables_DB::get_instance();
-    
-    // Si se proporcionó un ID específico, usar ese
-    $personalization = null;
-    if ($personalization_id) {
-        $personalization = $db->get_personalization_by_id($personalization_id);
-    } else {
-        $personalization = $db->get_personalization($product_id);
-    }
-    
-    if ($personalization) {
-        // Añadir información de navegador actual para comparación/debugging
-        $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field($_SERVER['HTTP_USER_AGENT']) : '';
-        $screen_info = isset($_POST['screen_info']) ? sanitize_text_field($_POST['screen_info']) : '';
-        
-        // Decodificar el estado para añadir metadatos
-        $decoded_state = json_decode($personalization->image_state, true);
-        
-        // Si no se pudo decodificar, crear un objeto vacío
-        if (!$decoded_state) {
-            $decoded_state = array();
+    try {
+        // Verificar clase DB
+        if (!class_exists('CuadrosPersonalizables_DB')) {
+            throw new Exception('Módulo de base de datos no disponible.');
         }
         
-        // Añadir información de carga
-        if (!isset($decoded_state['meta'])) {
-            $decoded_state['meta'] = array();
+        $db = CuadrosPersonalizables_DB::get_instance();
+        
+        // Verificar conexión a base de datos
+        global $wpdb;
+        if (!$wpdb->check_connection()) {
+            throw new Exception('Error de conexión a la base de datos.');
         }
         
-        $decoded_state['meta']['loaded_at'] = current_time('mysql');
-        $decoded_state['meta']['load_user_agent'] = $user_agent;
-        $decoded_state['meta']['load_screen_info'] = $screen_info;
+        // Obtener personalización
+        $personalization = null;
         
-        // Reconvertir a JSON
-        $personalization->image_state = json_encode($decoded_state, JSON_PRETTY_PRINT);
+        if ($personalization_id) {
+            // Priorizar búsqueda por ID específico
+            $personalization = $db->get_personalization_by_id($personalization_id);
+        } else {
+            // Buscar por producto
+            $personalization = $db->get_personalization($product_id);
+        }
         
-        // Actualizar el registro para fines de seguimiento
-        $db->update_personalization_metadata($personalization->id, 
-                                           array('loaded_at' => current_time('mysql')));
+        if (!$personalization) {
+            wp_send_json_error('No se encontró ninguna personalización.');
+            return;
+        }
         
-        // MODIFICACIÓN: Priorizar image_url si existe
+        // Priorizar image_url sobre image_data (menos carga)
         $image_data = '';
         if (!empty($personalization->image_url)) {
-            // Si tenemos una URL, usarla
             $image_data = $personalization->image_url;
         } else if (!empty($personalization->image_data)) {
-            // Compatibilidad con versiones antiguas
             $image_data = $personalization->image_data;
         }
         
-        wp_send_json_success(array(
+        // Verificar datos de imagen
+        if (empty($image_data)) {
+            throw new Exception('Los datos de la imagen están vacíos.');
+        }
+        
+        // Datos completos para respuesta
+        $response_data = array(
             'id' => $personalization->id,
+            'image_url' => !empty($personalization->image_url) ? $personalization->image_url : '',
             'image_data' => $image_data,
             'image_state' => $personalization->image_state,
             'created_at' => $personalization->created_at,
             'updated_at' => $personalization->updated_at
-        ));
-    } else {
-        wp_send_json_error('No se encontró ninguna personalización guardada para este producto.');
+        );
+        
+        // Actualizar timestamp de carga
+        $db->update_personalization_metadata($personalization->id, 
+                                         array('loaded_at' => current_time('mysql')));
+        
+        wp_send_json_success($response_data);
+        
+    } catch (Exception $e) {
+        error_log('CPC Error: ' . $e->getMessage());
+        wp_send_json_error('Error: ' . $e->getMessage());
     }
 }
 /**

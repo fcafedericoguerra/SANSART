@@ -42,78 +42,63 @@ class CuadrosPersonalizables_Frontend {
   }
 
 /**
- * Encolar los scripts y estilos en la página de producto
+ * Cargar scripts y estilos en el frontend
  */
 public function cargar_scripts_frontend() {
-  if (is_product()) {
-      global $product;
-      
-      // Verificar que $product es un objeto WC_Product válido
-      if (!is_object($product)) {
-          // Si $product no es un objeto, intentar obtenerlo de la ID de la página actual
-          $product = wc_get_product(get_the_ID());
-          
-          // Si aún no tenemos un objeto de producto válido, salir
-          if (!is_object($product)) {
-              return;
-          }
-      }
+    if (is_product()) {
+        global $product;
         
-      // Verificar si es un producto personalizable
-      $mockup_url = get_post_meta($product->get_id(), '_mockup_url', true);
-      if (empty($mockup_url)) return;
-      
-      // Fabric.js
-      wp_enqueue_script(
-          'fabric-js',
-          'https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js',
-          array('jquery'),
-          null,
-          true
-      );
-
-      // Nuestro JS para Elementor - Asegurarse de que dependa de fabric.js
-      wp_enqueue_script(
-          'personalizador-frontend-js',
-          plugin_dir_url(dirname(__FILE__)) . 'assets/js/personalizador-frontend.js',
-          array('jquery', 'fabric-js'),
-          defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time(),
-          true
-      );
-      
-      // Script de depuración (solo en modo debug)
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-          wp_enqueue_script(
-              'personalizador-debug-js',
-              plugin_dir_url(dirname(__FILE__)) . 'assets/js/personalizador-debug.js',
-              array('jquery', 'personalizador-frontend-js'),
-              defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time(),
-              true
-          );
-      }
-
-      // Nuestro CSS
-      wp_enqueue_style(
-          'personalizador-frontend-css',
-          plugin_dir_url(dirname(__FILE__)) . 'assets/css/personalizador.css',
-          array(),
-          defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time()
-      );
-      
-      // Pasamos variables al JS para debugging
-      wp_localize_script(
-          'personalizador-frontend-js',
-          'personalizadorVars',
-          array(
-              'ajaxurl' => admin_url('admin-ajax.php'),
-              'nonce' => wp_create_nonce('personalizador_nonce'),
-              'debug' => defined('WP_DEBUG') ? WP_DEBUG : false,
-              'plugin_url' => plugin_dir_url(dirname(__FILE__)),
-              'product_id' => $product->get_id(),
-              'is_product_page' => is_product()
-          )
-      );
-  }
+        // Verificar que $product es un objeto válido
+        if (!is_object($product)) {
+            $product = wc_get_product(get_the_ID());
+            if (!is_object($product)) return;
+        }
+        
+        // Verificar si es un producto personalizable
+        $mockup_url = get_post_meta($product->get_id(), '_mockup_url', true);
+        if (empty($mockup_url)) return;
+        
+        // Fabric.js
+        wp_enqueue_script(
+            'fabric-js',
+            'https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js',
+            array('jquery'),
+            null,
+            true
+        );
+        
+        // Script principal
+        wp_enqueue_script(
+            'personalizador-frontend-js',
+            plugin_dir_url(dirname(__FILE__)) . 'assets/js/personalizador-frontend.js',
+            array('jquery', 'fabric-js'),
+            defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time(),
+            true
+        );
+        
+        // CSS para galería y personalizador
+        wp_enqueue_style(
+            'personalizador-frontend-css',
+            plugin_dir_url(dirname(__FILE__)) . 'assets/css/personalizador.css',
+            array(),
+            defined('CPC_PLUGIN_VERSION') ? CPC_PLUGIN_VERSION : time()
+        );
+        
+        // Variables para el script
+        wp_localize_script(
+            'personalizador-frontend-js',
+            'personalizadorVars',
+            array(
+                'ajaxurl' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('personalizador_nonce'),
+                'debug' => defined('WP_DEBUG') ? WP_DEBUG : false,
+                'plugin_url' => plugin_dir_url(dirname(__FILE__)),
+                'product_id' => $product->get_id(),
+                'is_product_page' => is_product(),
+                'load_timestamp' => time() // Para evitar caché
+            )
+        );
+    }
 }
 
 /**
