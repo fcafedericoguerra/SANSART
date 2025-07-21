@@ -11,3 +11,20 @@
         transform: none;
     }
 }
+/* 🖼️ Reparar la imagen cortada en carrito para productos FPD */
+.woocommerce ul.cart_list li img,
+.woocommerce .mini_cart_item img {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100px !important;
+  object-fit: contain !important;
+  display: block;
+  border-radius: 8px;
+}
+
+/* 🧱 Si el contenedor recorta, corregimos eso también */
+.woocommerce ul.cart_list li,
+.woocommerce .mini_cart_item {
+  overflow: visible !important;
+}

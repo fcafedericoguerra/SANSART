@@ -209,4 +209,106 @@ function hec_enqueue_styles() {
         '1.0.0'
     );
 }
+
+add_shortcode('mostrar_carrito_sansart', 'shortcode_mostrar_carrito_sansart');
+function shortcode_mostrar_carrito_sansart() {
+	if ( ! is_user_logged_in() ) wc_load_cart(); // para sesiones sin login
+
+	if ( WC()->cart->is_empty() ) {
+		return '<p>Tu carrito está vacío.</p>';
+	}
+
+	ob_start();
+	foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
+		$product = $cart_item['data'];
+
+		// 👇 Si existe imagen personalizada de FPD, úsala (soporta base64)
+		if ( isset($cart_item['fpd_product_thumbnail']) ) {
+			$src = $cart_item['fpd_product_thumbnail'];
+
+			// Verificamos si es base64 o una URL normal
+			if ( strpos($src, 'data:image') === 0 ) {
+				$thumbnail = '<img src="' . $src . '" alt="Vista previa personalizada" style="max-width: 100px; height: auto;">';
+			} else {
+				$thumbnail = '<img src="' . esc_url($src) . '" alt="Vista previa personalizada" style="max-width: 100px; height: auto;">';
+			}
+		} else {
+			$thumbnail = $product->get_image( 'thumbnail' );
+		}
+
+		echo '<div class="cart-item" style="display: flex; gap: 1rem; margin-bottom: 1rem;">';
+		echo '<div class="cart-thumb">' . $thumbnail . '</div>';
+		echo '<div class="cart-info">';
+		echo '<p style="margin: 0 0 4px;">' . esc_html($product->get_name()) . '</p>';
+		echo '<p style="margin: 0 0 4px;">Cantidad: ' . esc_html($cart_item['quantity']) . '</p>';
+		echo '<p style="margin: 0;">Precio: ' . wc_price($product->get_price()) . '</p>';
+		echo '</div>';
+		echo '</div>';
+	}
+	return ob_get_clean();
+}
+add_filter('woocommerce_add_cart_item_data', 'sansart_agregar_thumbnail_fpd_al_carrito', 10, 3);
+function sansart_agregar_thumbnail_fpd_al_carrito($cart_item_data, $product_id, $variation_id) {
+    // Verificamos si FPD ya generó una imagen
+    if (isset($_POST['fpd_product_thumbnail'])) {
+        $cart_item_data['fpd_product_thumbnail'] = sanitize_text_field($_POST['fpd_product_thumbnail']);
+    }
+
+    return $cart_item_data;
+}
+/// AJAX: Refrescar HTML del carrito sidebar [mostrar_carrito_sansart] + contador
+add_action('wp_ajax_sa_refresh_cart_html', 'sa_refresh_cart_html');
+add_action('wp_ajax_nopriv_sa_refresh_cart_html', 'sa_refresh_cart_html');
+function sa_refresh_cart_html() {
+    $html = do_shortcode('[mostrar_carrito_sansart]');
+
+    // Calcular el contador
+    $count = 0;
+    if ( WC()->cart && !WC()->cart->is_empty() ) {
+        foreach ( WC()->cart->get_cart() as $cart_item ) {
+            $count += $cart_item['quantity'];
+        }
+    }
+
+    wp_send_json_success([
+        'html' => $html,
+        'count' => $count,
+    ]);
+    wp_die();
+}
+
+add_action('wp_ajax_sa_ajax_search_products', 'sa_ajax_search_products');
+add_action('wp_ajax_nopriv_sa_ajax_search_products', 'sa_ajax_search_products');
+function sa_ajax_search_products() {
+    $query = sanitize_text_field($_GET['s'] ?? '');
+    $result = [];
+    if ($query && strlen($query) > 1) {
+        $args = array(
+            'post_type' => 'product',
+            'posts_per_page' => 10,
+            's' => $query,
+            'post_status' => 'publish',
+        );
+        $products = get_posts($args);
+        foreach ($products as $prod) {
+            $result[] = [
+                'title' => get_the_title($prod->ID),
+                'url'   => get_permalink($prod->ID),
+                'img'   => get_the_post_thumbnail_url($prod->ID, 'thumbnail') ?: wc_placeholder_img_src()
+            ];
+        }
+    }
+    wp_send_json_success($result);
+}
+
+// AJAX para devolver el shortcode [fpd] en HTML limpio
+add_action('wp_ajax_fpd_shortcode_html', 'fpd_shortcode_html');
+add_action('wp_ajax_nopriv_fpd_shortcode_html', 'fpd_shortcode_html');
+function fpd_shortcode_html() {
+    // Evita espacios o headers raros antes del HTML del editor
+    nocache_headers();
+    // Regresa el HTML del editor FPD tal cual
+    echo do_shortcode('[fpd]');
+    wp_die(); // Fin correcto para llamada AJAX
+}
 add_action('wp_enqueue_scripts', 'hec_enqueue_styles', 5);
