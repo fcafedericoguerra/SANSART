@@ -2,7 +2,6 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit; // Evitar acceso directo
 }
-
 /**
  * Hello Elementor Child Theme functions and definitions
  */
@@ -14,6 +13,8 @@ require_once get_stylesheet_directory() . '/inc/meta-boxes.php';
 // 2) Cargar shortcodes
 require_once get_stylesheet_directory() . '/inc/shortcodes.php';
 require_once get_stylesheet_directory() . '/inc/shortcodes-cuadros.php';
+require_once get_stylesheet_directory() . '/inc/shortcode-cuadros-artista.php';
+require_once get_stylesheet_directory() . '/inc/shortcodes-editables.php';
 
 // 3) Encolar scripts condicionalmente
 function hec_enqueue_scripts_condicionales() {
@@ -40,6 +41,35 @@ function hec_enqueue_scripts_condicionales() {
         );
 
         wp_localize_script('galeria-cuadros-js', 'ajaxurl', admin_url('admin-ajax.php'));
+
+        wp_enqueue_style(
+            'nouislider-css',
+            'https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.css',
+            array(),
+            null
+        );
+
+        wp_enqueue_script(
+            'nouislider-js',
+            'https://cdn.jsdelivr.net/npm/nouislider@15.6.1/dist/nouislider.min.js',
+            array(),
+            null,
+            true
+        );
+    }
+
+    // Solo en páginas con [galeria_editables]
+    if ( is_singular() && has_shortcode(get_post()->post_content, 'galeria_editables') ) {
+
+        wp_enqueue_script(
+            'galeria-editables-js',
+            get_stylesheet_directory_uri() . '/assets/js/galeria-editables.js',
+            array('jquery'),
+            time(),
+            true
+        );
+
+        wp_localize_script('galeria-editables-js', 'ajaxurl', admin_url('admin-ajax.php'));
 
         wp_enqueue_style(
             'nouislider-css',
@@ -188,6 +218,136 @@ function ajax_filtrar_productos() {
 add_action('wp_ajax_filtrar_productos', 'ajax_filtrar_productos');
 add_action('wp_ajax_nopriv_filtrar_productos', 'ajax_filtrar_productos');
 
+// 5.1) AJAX: filtrar productos editables
+function ajax_filtrar_editables() {
+    $tamano     = sanitize_text_field($_POST['tamano']);
+    $material   = sanitize_text_field($_POST['material']);
+    $orden      = sanitize_text_field($_POST['orden']);
+    $precio_min = isset($_POST['precio_min']) ? floatval($_POST['precio_min']) : 0;
+    $precio_max = isset($_POST['precio_max']) ? floatval($_POST['precio_max']) : 10000;
+
+    $tax_query = array(
+        'relation' => 'AND',
+        array(
+            'taxonomy' => 'product_cat',
+            'field'    => 'slug',
+            'terms'    => array('editables'),
+            'operator' => 'IN'
+        )
+    );
+
+    if (!empty($tamano)) {
+        $tax_query[] = array(
+            'taxonomy' => 'pa_tamano',
+            'field'    => 'slug',
+            'terms'    => $tamano
+        );
+    }
+
+    if (!empty($material)) {
+        $tax_query[] = array(
+            'taxonomy' => 'pa_material',
+            'field'    => 'slug',
+            'terms'    => $material
+        );
+    }
+
+    $args = array(
+        'post_type'      => 'product',
+        'posts_per_page' => 9,
+        'orderby'        => 'date',
+        'order'          => $orden === 'asc' ? 'ASC' : 'DESC',
+        'tax_query'      => $tax_query,
+        'meta_query'     => array(
+            array(
+                'key'     => '_price',
+                'value'   => array($precio_min, $precio_max),
+                'compare' => 'BETWEEN',
+                'type'    => 'NUMERIC'
+            )
+        )
+    );
+
+    $query = new WP_Query($args);
+
+    if ($query->have_posts()) {
+        ob_start();
+        while ($query->have_posts()) {
+            $query->the_post();
+            global $product;
+            ?>
+            <div class="cuadro-producto">
+                <a href="<?php the_permalink(); ?>">
+                    <?php if (has_post_thumbnail()): ?>
+                        <img src="<?php echo get_the_post_thumbnail_url(null, 'medium'); ?>" alt="<?php the_title(); ?>">
+                    <?php endif; ?>
+                    <h4><?php the_title(); ?></h4>
+                    <span class="precio">Desde <?php echo wc_price($product->get_price()); ?></span>
+                </a>
+            </div>
+            <?php
+        }
+        wp_reset_postdata();
+        wp_send_json_success(ob_get_clean());
+    } else {
+        wp_send_json_error('No hay productos que coincidan con los filtros.');
+    }
+
+    wp_die();
+}
+add_action('wp_ajax_filtrar_editables', 'ajax_filtrar_editables');
+add_action('wp_ajax_nopriv_filtrar_editables', 'ajax_filtrar_editables');
+
+// 5.2) AJAX: cargar más productos editables
+function ajax_cargar_mas_editables() {
+    $paged = isset($_POST['paged']) ? intval($_POST['paged']) : 1;
+
+    $args = array(
+        'post_type'      => 'product',
+        'posts_per_page' => 9,
+        'paged'          => $paged,
+        'orderby'        => 'date',
+        'order'          => 'DESC',
+        'tax_query'      => array(
+            array(
+                'taxonomy' => 'product_cat',
+                'field'    => 'slug',
+                'terms'    => array('editables'),
+                'operator' => 'IN'
+            )
+        )
+    );
+
+    $query = new WP_Query($args);
+
+    if ($query->have_posts()) {
+        ob_start();
+        while ($query->have_posts()) {
+            $query->the_post();
+            global $product;
+            ?>
+            <div class="cuadro-producto">
+                <a href="<?php the_permalink(); ?>">
+                    <?php if (has_post_thumbnail()): ?>
+                        <img src="<?php echo get_the_post_thumbnail_url(null, 'medium'); ?>" alt="<?php the_title(); ?>">
+                    <?php endif; ?>
+                    <h4><?php the_title(); ?></h4>
+                    <span class="precio">Desde <?php echo wc_price($product->get_price()); ?></span>
+                </a>
+            </div>
+            <?php
+        }
+        wp_reset_postdata();
+        wp_send_json_success(ob_get_clean());
+    } else {
+        wp_send_json_error('No hay más productos.');
+    }
+
+    wp_die();
+}
+add_action('wp_ajax_cargar_mas_editables', 'ajax_cargar_mas_editables');
+add_action('wp_ajax_nopriv_cargar_mas_editables', 'ajax_cargar_mas_editables');
+
 // 6) Encolar script JS global
 function hec_enqueue_global_scripts() {
     wp_enqueue_script(
@@ -301,14 +461,87 @@ function sa_ajax_search_products() {
     wp_send_json_success($result);
 }
 
-// AJAX para devolver el shortcode [fpd] en HTML limpio
-add_action('wp_ajax_fpd_shortcode_html', 'fpd_shortcode_html');
-add_action('wp_ajax_nopriv_fpd_shortcode_html', 'fpd_shortcode_html');
-function fpd_shortcode_html() {
-    // Evita espacios o headers raros antes del HTML del editor
-    nocache_headers();
-    // Regresa el HTML del editor FPD tal cual
-    echo do_shortcode('[fpd]');
-    wp_die(); // Fin correcto para llamada AJAX
+function hec_enqueue_cuadros_artista_css() {
+    wp_enqueue_style(
+        'cuadros-artista-style',
+        get_stylesheet_directory_uri() . '/assets/css/cuadros-artista.css',
+        array(),
+        '1.0'
+    );
 }
+add_action('wp_enqueue_scripts', 'hec_enqueue_cuadros_artista_css');
+
+function sansart_enqueue_cuadros_artista_scripts() {
+  wp_enqueue_script(
+    'cuadros-artista-js',
+    get_stylesheet_directory_uri() . '/assets/js/cuadros-artista.js',
+    array('jquery'),
+    '1.0',
+    true
+  );
+
+  wp_localize_script('cuadros-artista-js', 'sansartAjax', array(
+    'ajaxurl' => admin_url('admin-ajax.php'),
+  ));
+}
+add_action('wp_enqueue_scripts', 'sansart_enqueue_cuadros_artista_scripts');
+
 add_action('wp_enqueue_scripts', 'hec_enqueue_styles', 5);
+
+
+// AJAX: Obtener cuadros por artista
+add_action('wp_ajax_sansart_get_cuadros_artista', 'sansart_get_cuadros_artista');
+add_action('wp_ajax_nopriv_sansart_get_cuadros_artista', 'sansart_get_cuadros_artista');
+
+function sansart_get_cuadros_artista() {
+    $artista_id = isset($_POST['artista_id']) ? intval($_POST['artista_id']) : 0;
+    $pagina     = isset($_POST['pagina'])     ? max(1, intval($_POST['pagina'])) : 1;
+    $orden      = (isset($_POST['orden']) && strtolower($_POST['orden']) === 'asc') ? 'ASC' : 'DESC';
+
+    if (!$artista_id) {
+        wp_send_json_error('ID de artista no válido.');
+    }
+
+    $args = array(
+        'post_type'      => 'product',
+        'posts_per_page' => 9,
+        'paged'          => $pagina,
+        'orderby'        => 'date',
+        'order'          => $orden,
+        'meta_query'     => array(
+            array(
+                'key'     => 'artista_relacionado',
+                'value'   => '"' . $artista_id . '"', // ACF relación serializada
+                'compare' => 'LIKE',
+            ),
+        ),
+    );
+
+    $query = new WP_Query($args);
+
+    ob_start();
+    if ($query->have_posts()) {
+        while ($query->have_posts()) {
+            $query->the_post();
+
+            $link       = esc_url(get_permalink());
+            $title      = esc_html(get_the_title());
+            $thumb_url  = get_the_post_thumbnail_url(get_the_ID(), 'medium');
+            $thumb_html = $thumb_url ? '<img src="' . esc_url($thumb_url) . '" alt="' . esc_attr($title) . '">' : '';
+
+            echo '<div class="cuadro-artista" data-fecha="' . esc_attr(get_the_date('c')) . '">';
+            echo '<a href="' . $link . '">';
+            echo $thumb_html;
+            echo '<h3>' . $title . '</h3>';
+            echo '</a>';
+            echo '</div>';
+        }
+    }
+    wp_reset_postdata();
+
+    $html = ob_get_clean();
+    $html = preg_replace('/[\r\n\t]+/', '', $html); // limpiar saltos/espacios que puedan interferir
+    $html = trim($html);
+
+    wp_send_json_success(array('html' => $html));
+}
